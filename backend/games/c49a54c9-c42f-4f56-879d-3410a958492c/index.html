@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Debris Dodger</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+            font-family: Arial, sans-serif;
+        }
+        #game-container {
+            border: 2px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+    
+    <script>
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+                this.player = null;
+                this.debris = null;
+                this.enemies = null;
+                this.playerBullets = null;
+                this.enemyBullets = null;
+                this.powerups = null;
+                this.cursors = null;
+                this.wasd = null;
+                this.spaceKey = null;
+                this.score = 0;
+                this.scoreText = null;
+                this.healthText = null;
+                this.health = 3;
+                this.gameSpeed = 1;
+                this.debrisTimer = 0;
+                this.enemyTimer = 0;
+                this.powerupTimer = 0;
+                this.lastShot = 0;
+                this.shotDelay = 200;
+                this.stars = [];
+                this.explosions = null;
+                this.isPaused = false;
+                this.pauseKey = null;
+                this.difficultyTimer = 0;
+                this.invulnerable = false;
+                this.invulnerabilityTimer = 0;
+                this.screenShake = 0;
+            }
+
+            preload() {
+                // Create simple geometric sprites
+                this.load.image('background', 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+                
+                // Create player ship sprite
+                const playerGraphics = this.add.graphics();
+                playerGraphics.fillStyle(0x00ff00);
+                playerGraphics.fillTriangle(0, -15, -10, 10, 10, 10);
+                playerGraphics.generateTexture('player', 20, 25);
+                playerGraphics.destroy();
+
+                // Create debris sprites
+                for (let i = 0; i < 5; i++) {
+                    const debrisGraphics = this.add.graphics();
+                    debrisGraphics.fillStyle(0x888888);
+                    const size = 15 + i * 5;
+                    debrisGraphics.fillCircle(size/2, size/2, size/2);
+                    debrisGraphics.generateTexture(`debris${i}`, size, size);
+                    debrisGraphics.destroy();
+                }
+
+                // Create enemy sprite
+                const enemyGraphics = this.add.graphics();
+                enemyGraphics.fillStyle(0xff0000);
+                enemyGraphics.fillTriangle(0, 10, -8, -8, 8, -8);
+                enemyGraphics.generateTexture('enemy', 16, 18);
+                enemyGraphics.destroy();
+
+                // Create bullet sprite
+                const bulletGraphics = this.add.graphics();
+                bulletGraphics.fillStyle(0xffff00);
+                bulletGraphics.fillRect(0, 0, 4, 8);
+                bulletGraphics.generateTexture('bullet', 4, 8);
+                bulletGraphics.destroy();
+
+                // Create enemy bullet sprite
+                const enemyBulletGraphics = this.add.graphics();
+                enemyBulletGraphics.fillStyle(0xff4444);
+                enemyBulletGraphics.fillRect(0, 0, 4, 8);
+                enemyBulletGraphics.generateTexture('enemyBullet', 4, 8);
+                enemyBulletGraphics.destroy();
+
+                // Create powerup sprite
+                const powerupGraphics = this.add.graphics();
+                powerupGraphics.fillStyle(0x00ffff);
+                powerupGraphics.fillStar(8, 8, 5, 8, 4);
+                powerupGraphics.generateTexture('powerup', 16, 16);
+                powerupGraphics.destroy();
+
+                // Create explosion particle
+                const explosionGraphics = this.add.graphics();
+                explosionGraphics.fillStyle(0xff8800);
+                explosionGraphics.fillCircle(2, 2, 2);
+                explosionGraphics.generateTexture('explosion', 4, 4);
+                explosionGraphics.destroy();
+            }
+
+            create() {
+                // Create starfield background
+                this.createStarfield();
+
+                // Initialize physics groups
+                this.debris = this.physics.add.group();
+                this.enemies = this.physics.add.group();
+                this.playerBullets = this.physics.add.group();
+                this.enemyBullets = this.physics.add.group();
+                this.powerups = this.physics.add.group();
+                this.explosions = this.add.group();
+
+                // Create player
+                this.player = this.physics.add.sprite(400, 500, 'player');
+                this.player.setCollideWorldBounds(true);
+                this.player.setDrag(200);
+
+                // Setup input
+                this.cursors = this.input.keyboard.createCursorKeys();
+                this.wasd = this.input.keyboard.addKeys('W,S,A,D');
+                this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+                this.pauseKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
+
+                // Setup collisions
+                this.physics.add.overlap(this.player, this.debris, this.hitDebris, null, this);
+                this.physics.add.overlap(this.player, this.enemies, this.hitEnemy, null, this);
+                this.physics.add.overlap(this.player, this.enemyBullets, this.hitEnemyBullet, null, this);
+                this.physics.add.overlap(this.player, this.powerups, this.collectPowerup, null, this);
+                this.physics.add.overlap(this.playerBullets, this.debris, this.destroyDebris, null, this);
+                this.physics.add.overlap(this.playerBullets, this.enemies, this.destroyEnemy, null, this);
+
+                // UI
+                this.scoreText = this.add.text(16, 16, 'Score: 0', {
+                    fontSize: '18px',
+                    fill: '#ffffff'
+                });
+                this.healthText = this.add.text(16, 40, 'Health: 3', {
+                    fontSize: '18px',
+                    fill: '#ff0000'
+                });
+                this.add.text(16, 64, 'Controls: WASD/Arrows to move, Space to shoot, P to pause', {
+                    fontSize: '12px',
+                    fill: '#888888'
+                });
+
+                // Initialize timers
+                this.debrisTimer = 0;
+                this.enemyTimer = 0;
+                this.powerupTimer = 0;
+                this.difficultyTimer = 0;
+            }
+
+            update(time, delta) {
+                if (this.pauseKey.isDown && !this.pauseKeyPressed) {
+                    this.isPaused = !this.isPaused;
+                    this.pauseKeyPressed = true;
+                    if (this.isPaused) {
+                        this.physics.pause();
+                        this.add.text(400, 300, 'PAUSED', {
+                            fontSize: '32px',
+                            fill: '#ffffff'
+                        }).setOrigin(0.5);
+                    } else {
+                        this.physics.resume();
+                    }
+                }
+                if (this.pauseKey.isUp) {
+                    this.pauseKeyPressed = false;
+                }
+
+                if (this.isPaused) return;
+
+                // Handle invulnerability
+                if (this.invulnerable) {
+                    this.invulnerabilityTimer -= delta;
+                    this.player.alpha = Math.sin(time * 0.01) * 0.5 + 0.5;
+                    if (this.invulnerabilityTimer <= 0) {
+                        this.invulnerable = false;
+                        this.player.alpha = 1;
+                    }
+                }
+
+                // Handle screen shake
+                if (this.screenShake > 0) {
+                    this.cameras.main.shake(this.screenShake, 0.01);
+                    this.screenShake -= delta * 0.01;
+                }
+
+                // Player movement
+                this.handlePlayerMovement();
+
+                // Player shooting
+                this.handlePlayerShooting(time);
+
+                // Update starfield
+                this.updateStarfield();
+
+                // Spawn debris
+                this.debrisTimer += delta;
+                if (this.debrisTimer > 500 / this.gameSpeed) {
+                    this.spawnDebris();
+                    this.debrisTimer = 0;
+                }
+
+                // Spawn enemies
+                this.enemyTimer += delta;
+                if (this.enemyTimer > 3000 / this.gameSpeed) {
+                    this.spawnEnemy();
+                    this.enemyTimer = 0;
+                }
+
+                // Spawn powerups
+                this.powerupTimer += delta;
+                if (this.powerupTimer > 15000) {
+                    this.spawnPowerup();
+                    this.powerupTimer = 0;
+                }
+
+                // Update enemies
+                this.updateEnemies(time);
+
+                // Clean up off-screen objects
+                this.cleanupObjects();
+
+                // Increase difficulty
+                this.difficultyTimer += delta;
+                if (this.difficultyTimer > 10000) {
+                    this.gameSpeed += 0.1;
+                    this.difficultyTimer = 0;
+                }
+
+                // Update score
+                this.score += Math.floor(delta * this.gameSpeed * 0.1);
+                this.scoreText.setText('Score: ' + this.score);
+                this.healthText.setText('Health: ' + this.health);
+            }
+
+            createStarfield() {
+                for (let i = 0; i < 100; i++) {
+                    const star = {
+                        x: Phaser.Math.Between(0, 800),
+                        y: Phaser.Math.Between(0, 600),
+                        speed: Phaser.Math.FloatBetween(0.5, 2),
+                        graphics: this.add.circle(0, 0, 1, 0xffffff)
+                    };
+                    star.graphics.setPosition(star.x, star.y);
+                    this.stars.push(star);
+                }
+            }
+
+            updateStarfield() {
+                this.stars.forEach(star => {
+                    star.y += star.speed * this.gameSpeed;
+                    if (star.y > 600) {
+                        star.y = 0;
+                        star.x = Phaser.Math.Between(0, 800);
+                    }
+                    star.graphics.setPosition(star.x, star.y);
+                });
+            }
+
+            handlePlayerMovement() {
+                const speed = 300;
+                
+                if (this.cursors.left.isDown || this.wasd.A.isDown) {
+                    this.player.setVelocityX(-speed);
+                } else if (this.cursors.right.isDown || this.wasd.D.isDown) {
+                    this.player.setVelocityX(speed);
+                } else {
+                    this.player.setVelocityX(0);
+                }
+
+                if (this.cursors.up.isDown || this.wasd.W.isDown) {
+                    this.player.setVelocityY(-speed);
+                } else if (this.cursors.down.isDown || this.wasd.S.isDown) {
+                    this.player.setVelocityY(speed);
+                } else {
+                    this.player.setVelocityY(0);
+                }
+            }
+
+            handlePlayerShooting(time) {
+                if (this.spaceKey.isDown && time > this.lastShot + this.shotDelay) {
+                    const bullet = this.physics.add.sprite(this.player.x, this.player.y - 15, 'bullet');
+                    bullet.setVelocityY(-400);
+                    this.playerBullets.add(bullet);
+                    this.lastShot = time;
+                }
+            }
+
+            spawnDebris() {
+                const debrisType = Phaser.Math.Between(0, 4);
+                const debris = this.physics.add.sprite(
+                    Phaser.Math.Between(0, 800),
+                    -50,
+                    `debris${debrisType}`
+                );
+                debris.setVelocityY(Phaser.Math.Between(50, 150) * this.gameSpeed);
+                debris.setVelocityX(Phaser.Math.Between(-50, 50));
+                debris.setAngularVelocity(Phaser.Math.Between(-100, 100));
+                this.debris.add(debris);
+            }
+
+            spawnEnemy() {
+                const enemy = this.physics.add.sprite(
+                    Phaser.Math.Between(50, 750),
+                    -50,
+                    'enemy'
+                );
+                enemy.setVelocityY(100 * this.gameSpeed);
+                enemy.lastShot = 0;
+                this.enemies.add(enemy);
+            }
+
+            spawnPowerup() {
+                const powerup = this.physics.add.sprite(
+                    Phaser.Math.Between(50, 750),
+                    -50,
+                    'powerup'
+                );
+                powerup.setVelocityY(80);
+                powerup.powerType = Phaser.Math.Between(0, 2); // 0: health, 1: rapid fire, 2: invulnerability
+                this.powerups.add(powerup);
+            }
+
+            updateEnemies(time) {
+                this.enemies.children.entries.forEach(enemy => {
+                    if (enemy.active && time > enemy.lastShot + 2000) {
+                        const bullet = this.physics.add.sprite(enemy.x, enemy.y + 15, 'enemyBullet');
+                        bullet.setVelocityY(200);
+                        this.enemyBullets.add(bullet);
+                        enemy.lastShot = time;
+                    }
+                });
+            }
+
+            hitDebris(player, debris) {
+                if (this.invulnerable) return;
+                
+                this.createExplosion(debris.x, debris.y);
+                debris.destroy();
+                this.takeDamage();
+            }
+
+            hitEnemy(player, enemy) {
+                if (this.invulnerable) return;
+                
+                this.createExplosion(enemy.x, enemy.y);
+                enemy.destroy();
+                this.takeDamage();
+            }
+
+            hitEnemyBullet(player, bullet) {
+                if (this.invulnerable) return;
+                
+                bullet.destroy();
+                this.takeDamage();
+            }
+
+            takeDamage() {
+                this.health--;
+                this.invulnerable = true;
+                this.invulnerabilityTimer = 2000;
+                this.screenShake = 200;
+                
+                if (this.health <= 0) {
+                    this.gameOver();
+                }
+            }
+
+            collectPowerup(player, powerup) {
+                switch (powerup.powerType) {
+                    case 0: // Health
+                        this.health = Math.min(this.health + 1, 5);
+                        break;
+                    case 1: // Rapid fire
+                        this.shotDelay = 100;
+                        this.time.delayedCall(5000, () => {
+                            this.shotDelay = 200;
+                        });
+                        break;
+                    case 2: // Invulnerability
+                        this.invulnerable = true;
+                        this.invulnerabilityTimer = 3000;
+                        break;
+                }
+                powerup.destroy();
+                this.score += 100;
+            }
+
+            destroyDebris(bullet, debris) {
+                this.createExplosion(debris.x, debris.y);
+                bullet.destroy();
+                debris.destroy();
+                this.score += 10;
+            }
+
+            destroyEnemy(bullet, enemy) {
+                this.createExplosion(enemy.x, enemy.y);
+                bullet.destroy();
+                enemy.destroy();
+                this.score += 50;
+            }
+
+            createExplosion(x, y) {
+                for (let i = 0; i < 8; i++) {
+                    const particle = this.add.sprite(x, y, 'explosion');
+                    const angle = (i / 8) * Math.PI * 2;
+                    const speed = Phaser.Math.Between(50, 100);
+                    
+                    this.tweens.add({
+                        targets: particle,
+                        x: x + Math.cos(angle) * speed,
+                        y: y + Math.sin(angle) * speed,
+                        alpha: 0,
+                        scale: 0,
+                        duration: 500,
+                        onComplete: () => particle.destroy()
+                    });
+                }
+            }
+
+            cleanupObjects() {
+                [this.debris, this.enemies, this.playerBullets, this.enemyBullets, this.powerups].forEach(group => {
+                    group.children.entries.forEach(obj => {
+                        if (obj.y > 650 || obj.y < -50 || obj.x < -50 || obj.x > 850) {
+                            obj.destroy();
+                        }
+                    });
+                });
+            }
+
+            gameOver() {
+                this.physics.pause();
+                
+                const gameOverText = this.add.text(400, 250, 'GAME OVER', {
+                    fontSize: '48px',
+                    fill: '#ff0000'
+                }).setOrigin(0.5);
+
+                const finalScoreText = this.add.text(400, 300, `Final Score: ${this.score}`, {
+                    fontSize: '24px',
+                    fill: '#ffffff'
+                }).setOrigin(0.5);
+
+                const restartText = this.add.text(400, 350, 'Press SPACE to restart', {
+                    fontSize: '18px',
+                    fill: '#888888'
+                }).setOrigin(0.5);
+
+                this.input.keyboard.once('keydown-SPACE', () => {
+                    this.scene.restart();
+                });
+            }
+        }
+
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            parent: 'game-container',
+            backgroundColor: '#000000',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: GameScene
+        };
+
+        const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>

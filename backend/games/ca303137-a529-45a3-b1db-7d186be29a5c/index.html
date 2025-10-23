@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Nova Defender</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 2px solid #ff00ff;
+            box-shadow: 0 0 20px #ff00ff;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+    <script>
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+            }
+
+            preload() {
+                // Create simple geometric shapes as textures
+                this.add.graphics()
+                    .fillStyle(0x00ffff)
+                    .fillRect(0, 0, 20, 30)
+                    .generateTexture('player', 20, 30);
+
+                this.add.graphics()
+                    .fillStyle(0xff0000)
+                    .fillRect(0, 0, 15, 15)
+                    .generateTexture('enemy', 15, 15);
+
+                this.add.graphics()
+                    .fillStyle(0xffff00)
+                    .fillRect(0, 0, 4, 8)
+                    .generateTexture('bullet', 4, 8);
+
+                this.add.graphics()
+                    .fillStyle(0xff8800)
+                    .fillRect(0, 0, 4, 8)
+                    .generateTexture('enemyBullet', 4, 8);
+
+                this.add.graphics()
+                    .fillStyle(0x00ff00)
+                    .fillRect(0, 0, 12, 12)
+                    .generateTexture('powerup', 12, 12);
+
+                this.add.graphics()
+                    .fillStyle(0xff00ff)
+                    .fillRect(0, 0, 40, 40)
+                    .generateTexture('boss', 40, 40);
+
+                this.add.graphics()
+                    .fillStyle(0x888888)
+                    .fillRect(0, 0, 8, 8)
+                    .generateTexture('star', 8, 8);
+            }
+
+            create() {
+                this.score = 0;
+                this.health = 3;
+                this.level = 1;
+                this.gameSpeed = 100;
+                this.canBoost = true;
+                this.rapidFire = false;
+                this.wideShot = false;
+                this.shield = false;
+                this.powerupTimer = 0;
+                this.enemySpawnTimer = 0;
+                this.bossSpawned = false;
+                this.enemiesKilled = 0;
+
+                // Create scrolling background
+                this.stars = this.physics.add.group();
+                for (let i = 0; i < 20; i++) {
+                    const star = this.add.image(
+                        Phaser.Math.Between(0, 800),
+                        Phaser.Math.Between(0, 600),
+                        'star'
+                    );
+                    star.alpha = 0.5;
+                    this.stars.add(star);
+                }
+
+                // Create player
+                this.player = this.physics.add.sprite(400, 500, 'player');
+                this.player.setCollideWorldBounds(true);
+
+                // Create groups
+                this.bullets = this.physics.add.group();
+                this.enemies = this.physics.add.group();
+                this.enemyBullets = this.physics.add.group();
+                this.powerups = this.physics.add.group();
+                this.bosses = this.physics.add.group();
+
+                // Controls
+                this.cursors = this.input.keyboard.createCursorKeys();
+                this.wasd = this.input.keyboard.addKeys('W,S,A,D,SHIFT');
+
+                // UI
+                this.scoreText = this.add.text(10, 10, 'Score: 0', {
+                    fontSize: '20px',
+                    fill: '#00ffff'
+                });
+                this.healthText = this.add.text(10, 40, 'Health: 3', {
+                    fontSize: '20px',
+                    fill: '#ff0000'
+                });
+                this.levelText = this.add.text(10, 70, 'Level: 1', {
+                    fontSize: '20px',
+                    fill: '#ffff00'
+                });
+
+                // Auto-fire
+                this.time.addEvent({
+                    delay: 200,
+                    callback: this.fireBullet,
+                    callbackScope: this,
+                    loop: true
+                });
+
+                // Collisions
+                this.physics.add.overlap(this.bullets, this.enemies, this.hitEnemy, null, this);
+                this.physics.add.overlap(this.bullets, this.bosses, this.hitBoss, null, this);
+                this.physics.add.overlap(this.player, this.enemies, this.hitPlayer, null, this);
+                this.physics.add.overlap(this.player, this.enemyBullets, this.hitPlayer, null, this);
+                this.physics.add.overlap(this.player, this.powerups, this.collectPowerup, null, this);
+                this.physics.add.overlap(this.player, this.bosses, this.hitPlayer, null, this);
+            }
+
+            update(time, delta) {
+                // Player movement
+                const speed = 300;
+                let currentSpeed = speed;
+
+                if ((this.cursors.shift.isDown || this.wasd.SHIFT.isDown) && this.canBoost) {
+                    currentSpeed = speed * 2;
+                    this.canBoost = false;
+                    this.time.delayedCall(3000, () => { this.canBoost = true; });
+                }
+
+                if (this.cursors.left.isDown || this.wasd.A.isDown) {
+                    this.player.setVelocityX(-currentSpeed);
+                } else if (this.cursors.right.isDown || this.wasd.D.isDown) {
+                    this.player.setVelocityX(currentSpeed);
+                } else {
+                    this.player.setVelocityX(0);
+                }
+
+                if (this.cursors.up.isDown || this.wasd.W.isDown) {
+                    this.player.setVelocityY(-currentSpeed);
+                } else if (this.cursors.down.isDown || this.wasd.S.isDown) {
+                    this.player.setVelocityY(currentSpeed);
+                } else {
+                    this.player.setVelocityY(0);
+                }
+
+                // Move stars for scrolling effect
+                this.stars.children.entries.forEach(star => {
+                    star.y += 2;
+                    if (star.y > 600) {
+                        star.y = -10;
+                        star.x = Phaser.Math.Between(0, 800);
+                    }
+                });
+
+                // Spawn enemies
+                this.enemySpawnTimer += delta;
+                if (this.enemySpawnTimer > 1000 && !this.bossSpawned) {
+                    this.spawnEnemy();
+                    this.enemySpawnTimer = 0;
+                }
+
+                // Spawn boss
+                if (this.enemiesKilled >= 10 + (this.level * 5) && !this.bossSpawned) {
+                    this.spawnBoss();
+                    this.bossSpawned = true;
+                }
+
+                // Spawn powerups
+                this.powerupTimer += delta;
+                if (this.powerupTimer > 8000) {
+                    this.spawnPowerup();
+                    this.powerupTimer = 0;
+                }
+
+                // Move bullets
+                this.bullets.children.entries.forEach(bullet => {
+                    if (bullet.y < 0) bullet.destroy();
+                });
+
+                this.enemyBullets.children.entries.forEach(bullet => {
+                    if (bullet.y > 600) bullet.destroy();
+                });
+
+                // Enemy AI
+                this.enemies.children.entries.forEach(enemy => {
+                    if (Math.random() < 0.002) {
+                        this.fireEnemyBullet(enemy);
+                    }
+                });
+
+                // Boss AI
+                this.bosses.children.entries.forEach(boss => {
+                    if (Math.random() < 0.01) {
+                        this.fireEnemyBullet(boss);
+                    }
+                    boss.x += Math.sin(time * 0.002) * 2;
+                });
+
+                // Clean up off-screen objects
+                this.cleanupObjects();
+            }
+
+            fireBullet() {
+                if (!this.player.active) return;
+
+                const bullet = this.physics.add.sprite(this.player.x, this.player.y - 15, 'bullet');
+                bullet.setVelocityY(-400);
+                this.bullets.add(bullet);
+
+                if (this.wideShot) {
+                    const leftBullet = this.physics.add.sprite(this.player.x - 10, this.player.y - 15, 'bullet');
+                    leftBullet.setVelocity(-100, -400);
+                    this.bullets.add(leftBullet);
+
+                    const rightBullet = this.physics.add.sprite(this.player.x + 10, this.player.y - 15, 'bullet');
+                    rightBullet.setVelocity(100, -400);
+                    this.bullets.add(rightBullet);
+                }
+            }
+
+            spawnEnemy() {
+                const enemy = this.physics.add.sprite(
+                    Phaser.Math.Between(50, 750),
+                    -20,
+                    'enemy'
+                );
+                enemy.setVelocityY(Phaser.Math.Between(50, 150));
+                enemy.health = 1;
+                this.enemies.add(enemy);
+            }
+
+            spawnBoss() {
+                const boss = this.physics.add.sprite(400, 50, 'boss');
+                boss.setVelocityY(0);
+                boss.health = 10 + (this.level * 5);
+                boss.maxHealth = boss.health;
+                this.bosses.add(boss);
+
+                // Boss health bar
+                this.bossHealthBg = this.add.rectangle(400, 30, 200, 10, 0x333333);
+                this.bossHealthBar = this.add.rectangle(400, 30, 200, 10, 0xff0000);
+            }
+
+            spawnPowerup() {
+                const powerup = this.physics.add.sprite(
+                    Phaser.Math.Between(50, 750),
+                    -20,
+                    'powerup'
+                );
+                powerup.setVelocityY(100);
+                powerup.type = Phaser.Math.Between(1, 4); // 1: rapid fire, 2: wide shot, 3: shield, 4: health
+                this.powerups.add(powerup);
+            }
+
+            fireEnemyBullet(enemy) {
+                const bullet = this.physics.add.sprite(enemy.x, enemy.y + 15, 'enemyBullet');
+                bullet.setVelocityY(200);
+                this.enemyBullets.add(bullet);
+            }
+
+            hitEnemy(bullet, enemy) {
+                bullet.destroy();
+                enemy.health--;
+                
+                if (enemy.health <= 0) {
+                    enemy.destroy();
+                    this.score += 100;
+                    this.enemiesKilled++;
+                    this.updateUI();
+                }
+            }
+
+            hitBoss(bullet, boss) {
+                bullet.destroy();
+                boss.health--;
+
+                // Update boss health bar
+                const healthPercent = boss.health / boss.maxHealth;
+                this.bossHealthBar.scaleX = healthPercent;
+
+                if (boss.health <= 0) {
+                    boss.destroy();
+                    this.score += 1000;
+                    this.bossHealthBg.destroy();
+                    this.bossHealthBar.destroy();
+                    this.nextLevel();
+                }
+            }
+
+            hitPlayer(player, object) {
+                if (this.shield) return;
+
+                object.destroy();
+                this.health--;
+                this.updateUI();
+
+                // Invincibility frames
+                this.shield = true;
+                this.player.setTint(0x00ffff);
+                this.time.delayedCall(1000, () => {
+                    this.shield = false;
+                    this.player.clearTint();
+                });
+
+                if (this.health <= 0) {
+                    this.gameOver();
+                }
+            }
+
+            collectPowerup(player, powerup) {
+                powerup.destroy();
+                
+                switch(powerup.type) {
+                    case 1: // Rapid fire
+                        this.rapidFire = true;
+                        this.time.delayedCall(5000, () => { this.rapidFire = false; });
+                        break;
+                    case 2: // Wide shot
+                        this.wideShot = true;
+                        this.time.delayedCall(8000, () => { this.wideShot = false; });
+                        break;
+                    case 3: // Shield
+                        this.shield = true;
+                        this.player.setTint(0x00ff00);
+                        this.time.delayedCall(5000, () => {
+                            this.shield = false;
+                            this.player.clearTint();
+                        });
+                        break;
+                    case 4: // Health
+                        if (this.health < 3) {
+                            this.health++;
+                            this.updateUI();
+                        }
+                        break;
+                }
+            }
+
+            nextLevel() {
+                if (this.level >= 3) {
+                    this.winGame();
+                    return;
+                }
+
+                this.level++;
+                this.bossSpawned = false;
+                this.enemiesKilled = 0;
+                this.updateUI();
+
+                // Clear all objects
+                this.enemies.clear(true, true);
+                this.enemyBullets.clear(true, true);
+                this.powerups.clear(true, true);
+
+                // Show level complete message
+                const levelComplete = this.add.text(400, 300, `Level ${this.level - 1} Complete!`, {
+                    fontSize: '32px',
+                    fill: '#00ff00'
+                }).setOrigin(0.5);
+
+                this.time.delayedCall(2000, () => {
+                    levelComplete.destroy();
+                });
+            }
+
+            gameOver() {
+                this.add.text(400, 300, 'GAME OVER', {
+                    fontSize: '48px',
+                    fill: '#ff0000'
+                }).setOrigin(0.5);
+
+                this.add.text(400, 350, `Final Score: ${this.score}`, {
+                    fontSize: '24px',
+                    fill: '#ffffff'
+                }).setOrigin(0.5);
+
+                this.add.text(400, 400, 'Click to Restart', {
+                    fontSize: '20px',
+                    fill: '#ffff00'
+                }).setOrigin(0.5);
+
+                this.input.once('pointerdown', () => {
+                    this.scene.restart();
+                });
+
+                this.physics.pause();
+            }
+
+            winGame() {
+                this.add.text(400, 300, 'YOU WIN!', {
+                    fontSize: '48px',
+                    fill: '#00ff00'
+                }).setOrigin(0.5);
+
+                this.add.text(400, 350, `Final Score: ${this.score}`, {
+                    fontSize: '24px',
+                    fill: '#ffffff'
+                }).setOrigin(0.5);
+
+                this.add.text(400, 400, 'Click to Restart', {
+                    fontSize: '20px',
+                    fill: '#ffff00'
+                }).setOrigin(0.5);
+
+                this.input.once('pointerdown', () => {
+                    this.scene.restart();
+                });
+
+                this.physics.pause();
+            }
+
+            updateUI() {
+                this.scoreText.setText(`Score: ${this.score}`);
+                this.healthText.setText(`Health: ${this.health}`);
+                this.levelText.setText(`Level: ${this.level}`);
+            }
+
+            cleanupObjects() {
+                this.enemies.children.entries.forEach(enemy => {
+                    if (enemy.y > 650) enemy.destroy();
+                });
+
+                this.powerups.children.entries.forEach(powerup => {
+                    if (powerup.y > 650) powerup.destroy();
+                });
+            }
+        }
+
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            backgroundColor: '#001122',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: GameScene
+        };
+
+        const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>

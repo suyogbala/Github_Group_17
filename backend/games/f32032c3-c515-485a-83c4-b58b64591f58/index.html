@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Galaxy Defender</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000;
+            font-family: 'Courier New', monospace;
+        }
+        #game-container {
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container"></div>
+    <script>
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            parent: 'game-container',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            },
+            backgroundColor: '#000000'
+        };
+
+        const game = new Phaser.Game(config);
+
+        let player;
+        let cursors;
+        let bullets;
+        let enemies;
+        let enemyBullets;
+        let powerUps;
+        let stars;
+        let score = 0;
+        let scoreText;
+        let lives = 3;
+        let livesText;
+        let level = 1;
+        let levelText;
+        let fireRate = 200;
+        let lastFired = 0;
+        let gameOver = false;
+        let boss;
+        let bossHealthBar;
+        let bossHealthBarBg;
+        let bossHealthText;
+        let enemySpawnTimer;
+        let powerUpTypes = ['rapid', 'wide', 'shield'];
+        let activePowerUp = null;
+        let powerUpEndTime = 0;
+        let shieldGraphic;
+        let dashCooldown = false;
+        let dashSpeed = 800;
+        let normalSpeed = 300;
+        let enemyWaveCount = 0;
+        let isBossLevel = false;
+        let particles;
+        let wideShot = false;
+        let shieldActive = false;
+        let comboMultiplier = 1;
+        let lastKillTime = 0;
+        let comboText;
+        let pauseKey;
+        let isPaused = false;
+        let pauseText;
+
+        function preload() {
+            this.load.setBaseURL('');
+        }
+
+        function create() {
+            createStarfield.call(this);
+            createPlayer.call(this);
+            createBulletGroups.call(this);
+            createEnemyGroups.call(this);
+            createPowerUpGroup.call(this);
+            createUI.call(this);
+            setupControls.call(this);
+            setupCollisions.call(this);
+            startEnemySpawn.call(this);
+            createParticles.call(this);
+        }
+
+        function createStarfield() {
+            stars = this.add.group();
+            for (let i = 0; i < 100; i++) {
+                const x = Phaser.Math.Between(0, 800);
+                const y = Phaser.Math.Between(0, 600);
+                const size = Phaser.Math.Between(1, 3);
+                const star = this.add.rectangle(x, y, size, size, 0xffffff, 0.8);
+                star.speed = size;
+                stars.add(star);
+            }
+        }
+
+        function createPlayer() {
+            player = this.add.graphics();
+            player.x = 400;
+            player.y = 500;
+            
+            drawPlayer(player);
+            
+            this.physics.add.existing(player);
+            player.body.setSize(30, 30);
+            player.body.setCollideWorldBounds(true);
+            player.health = 100;
+            player.maxHealth = 100;
+        }
+
+        function drawPlayer(graphics) {
+            graphics.clear();
+            graphics.fillStyle(0x00ffff, 1);
+            graphics.fillTriangle(-15, 15, 0, -15, 15, 15);
+            graphics.fillStyle(0xff00ff, 1);
+            graphics.fillRect(-10, 10, 5, 8);
+            graphics.fillRect(5, 10, 5, 8);
+            graphics.lineStyle(2, 0xffff00, 1);
+            graphics.strokeTriangle(-15, 15, 0, -15, 15, 15);
+        }
+
+        function createBulletGroups() {
+            bullets = this.physics.add.group({
+                defaultKey: 'bullet',
+                maxSize: 50
+            });
+
+            enemyBullets = this.physics.add.group({
+                defaultKey: 'enemyBullet',
+                maxSize: 100
+            });
+        }
+
+        function createEnemyGroups() {
+            enemies = this.physics.add.group();
+        }
+
+        function createPowerUpGroup() {
+            powerUps = this.physics.add.group();
+        }
+
+        function createUI() {
+            scoreText = this.add.text(16, 16, 'Score: 0', {
+                fontSize: '20px',
+                fill: '#0ff',
+                fontFamily: 'Courier New'
+            });
+
+            livesText = this.add.text(16, 46, 'Lives: 3', {
+                fontSize: '20px',
+                fill: '#f0f',
+                fontFamily: 'Courier New'
+            });
+
+            levelText = this.add.text(16, 76, 'Level: 1', {
+                fontSize: '20px',
+                fill: '#ff0',
+                fontFamily: 'Courier New'
+            });
+
+            comboText = this.add.text(400, 16, '', {
+                fontSize: '24px',
+                fill: '#ff0',
+                fontFamily: 'Courier New'
+            }).setOrigin(0.5, 0);
+        }
+
+        function setupControls() {
+            cursors = this.input.keyboard.createCursorKeys();
+            pauseKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
+        }
+
+        function setupCollisions() {
+            this.physics.add.overlap(bullets, enemies, hitEnemy, null, this);
+            this.physics.add.overlap(player, enemies, hitPlayer, null, this);
+            this.physics.add.overlap(player, enemyBullets, hitPlayerBullet, null, this);
+            this.physics.add.overlap(player, powerUps, collectPowerUp, null, this);
+            this.physics.add.overlap(bullets, boss, hitBoss, null, this);
+        }
+
+        function createParticles() {
+            particles = this.add.particles();
+        }
+
+        function startEnemySpawn() {
+            enemySpawnTimer = this.time.addEvent({
+                delay: 2000,
+                callback: spawnEnemyWave,
+                callbackScope: this,
+                loop: true
+            });
+        }
+
+        function spawnEnemyWave() {
+            if (gameOver || isBossLevel) return;
+
+            enemyWaveCount++;
+            const enemiesInWave = 3 + Math.floor(level * 1.5);
+
+            for (let i = 0; i < enemiesInWave; i++) {
+                this.time.delayedCall(i * 300, () => {
+                    spawnEnemy.call(this);
+                });
+            }
+
+            if (enemyWaveCount >= 5) {
+                spawnBoss.call(this);
+            }
+        }
+
+        function spawnEnemy() {
+            const x = Phaser.Math.Between(50, 750);
+            const enemy = this.add.graphics();
+            enemy.x = x;
+            enemy.y = -30;
+            
+            const types = ['basic', 'fast', 'shooter'];
+            const type = Phaser.Utils.Array.GetRandom(types);
+            enemy.enemyType = type;
+
+            drawEnemy(enemy, type);
+            
+            this.physics.add.existing(enemy);
+            enemy.body.setSize(30, 30);
+            enemy.health = 2 + level;
+            
+            if (type === 'basic') {
+                enemy.body.setVelocityY(100 + level * 10);
+                enemy.movePattern = 'straight';
+            } else if (type === 'fast') {
+                enemy.body.setVelocityY(200 + level * 15);
+                enemy.movePattern = 'zigzag';
+                enemy.zigzagTimer = 0;
+            } else if (type === 'shooter') {
+                enemy.body.setVelocityY(80 + level * 8);
+                enemy.movePattern = 'shooter';
+                enemy.shootTimer = 0;
+            }
+            
+            enemies.add(enemy);
+        }
+
+        function drawEnemy(graphics, type) {
+            graphics.clear();
+            if (type === 'basic') {
+                graphics.fillStyle(0xff0000, 1);
+                graphics.fillRect(-15, -15, 30, 30);
+                graphics.lineStyle(2, 0xff00ff, 1);
+                graphics.strokeRect(-15, -15, 30, 30);
+            } else if (type === 'fast') {
+                graphics.fillStyle(0xff6600, 1);
+                graphics.fillTriangle(-15, 15, 0, -15, 15, 15);
+                graphics.lineStyle(2, 0xffff00, 1);
+                graphics.strokeTriangle(-15, 15, 0, -15, 15, 15);
+            } else if (type === 'shooter') {
+                graphics.fillStyle(0xff00ff, 1);
+                graphics.fillCircle(0, 0, 15);
+                graphics.lineStyle(2, 0x00ffff, 1);
+                graphics.strokeCircle(0, 0, 15);
+            }
+        }
+
+        function spawnBoss() {
+            if (isBossLevel || !enemySpawnTimer) return;
+            
+            isBossLevel = true;
+            enemySpawnTimer.remove();
+            
+            this.time.delayedCall(2000, () => {
+                boss = this.add.graphics();
+                boss.x = 400;
+                boss.y = -100;
+                
+                drawBoss(boss, level);
+                
+                this.physics.add.existing(boss);
+                boss.body.setSize(80, 60);
+                boss.health = 100 + (level * 50);
+                boss.maxHealth = boss.health;
+                boss.moveTimer = 0;
+                boss.shootTimer = 0;
+                boss.phase = 1;
+                
+                this.tweens.add({
+                    targets: boss,
+                    y: 100,
+                    duration: 2000,
+                    ease: 'Power2'
+                });
+
+                createBossHealthBar.call(this);
+            });
+        }
+
+        function drawBoss(graphics, level) {
+            graphics.clear();
+            
+            if (level === 1) {
+                graphics.fillStyle(0xff0000, 1);
+                graphics.fillRect(-40, -30, 80, 60);
+                graphics.fillStyle(0xff6600, 1);
+                graphics.fillRect(-50, -10, 20, 10);
+                graphics.fillRect(30, -10, 20, 10);
+                graphics.lineStyle(3, 0xffff00, 1);
+                graphics.strokeRect(-40, -30, 80, 60);
+                graphics.fillStyle(0x00ffff, 1);
+                graphics.fillCircle(-20, -10, 8);
+                graphics.fillCircle(20, -10, 8);
+            } else if (level === 2) {
+                graphics.fillStyle(0x00ff00, 1);
+                graphics.fillEllipse(0, 0, 100, 70);
+                graphics.fillStyle(0xff00ff, 1);
+                graphics.fillCircle(-25, -10, 10);
+                graphics.fillCircle(25, -10, 10);
+                graphics.fillCircle(0, 15, 10);
+                graphics.lineStyle(3, 0xffff00, 1);
+                graphics.strokeEllipse(0, 0, 100, 70);
+            } else {
+                graphics.fillStyle(0x0000ff, 1);
+                graphics.fillRect(-45, -35, 90, 70);
+                graphics.fillStyle(0xff00ff, 1);
+                graphics.fillTriangle(-30, -35, -30, -50, -15, -35);
+                graphics.fillTriangle(30, -35, 30, -50, 15, -35);
+                graphics.lineStyle(3, 0x00ffff, 1);
+                graphics.strokeRect(-45, -35, 90, 70);
+                graphics.fillStyle(0xff0000, 1);
+                graphics.fillRect(-20, -15, 40, 10);
+            }
+        }
+
+        function createBossHealthBar() {
+            bossHealthBarBg = this.add.rectangle(400, 30, 400, 20, 0x330000);
+            bossHealthBar = this.add.rectangle(400, 30, 400, 20, 0xff0000);
+            bossHealthText = this.add.text(400, 30, 'BOSS', {
+                fontSize: '16px',
+                fill: '#fff',
+                fontFamily: 'Courier New'
+            }).setOrigin(0.5);
+        }
+
+        function updateBossHealthBar() {
+            if (!boss || !bossHealthBar) return;
+            const healthPercent = boss.health / boss.maxHealth;
+            bossHealthBar.width = 400 * healthPercent;
+        }
+
+        function update(time, delta) {
+            if (Phaser.Input.Keyboard.JustDown(pauseKey)) {
+                togglePause.call(this);
+            }
+
+            if (isPaused || gameOver) return;
+
+            updateStarfield();
+            updatePlayer(time, delta);
+            updateBullets();
+            updateEnemies(time, delta);
+            updateBoss(time, delta);
+            updatePowerUps();
+            updateCombo(time);
+            cleanupOffscreen();
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            
+            if (isPaused) {
+                this.physics.pause();
+                if (!pauseText) {
+                    pauseText = this.add.text(400, 300, 'PAUSED\nPress P to Resume', {
+                        fontSize: '48px',
+                        fill: '#0ff',
+                        fontFamily: 'Courier New',
+                        align: 'center'
+                    }).setOrigin(0.5);
+                } else {
+                    pauseText.setVisible(true);
+                }
+            } else {
+                this.physics.resume();
+                if (pauseText) {
+                    pauseText.setVisible(false);
+                }
+            }
+        }
+
+        function updateStarfield() {
+            stars.children.entries.forEach(star => {
+                star.y += star.speed;
+                if (star.y > 600) {
+                    star.y = 0;
+                    star.x = Phaser.Math.Between(0, 800);
+                }
+            });
+        }
+
+        function updatePlayer(time, delta) {
+            if (!player.active) return;
+
+            player.body.setVelocity(0);
+
+            if (cursors.left.isDown) {
+                player.body.setVelocityX(-normalSpeed);
+            } else if (cursors.right.isDown) {
+                player.body.setVelocityX(normalSpeed);
+            }
+
+            if (cursors.space.isDown && !dashCooldown) {
+                if (cursors.left.isDown) {
+                    player.body.setVelocityX(-dashSpeed);
+                } else if (cursors.right.isDown) {
+                    player.body.setVelocityX(dashSpeed);
+                }
+                dashCooldown = true;
+                this.time.delayedCall(1000, () => { dashCooldown = false; });
+            }
+
+            if (time > lastFired + fireRate) {
+                fireBullet.call(this);
+                lastFired = time;
+            }
+
+            if (activePowerUp && time > powerUpEndTime) {
+                deactivatePowerUp();
+            }
+
+            if (shieldActive && shieldGraphic) {
+                shieldGraphic.rotation += 0.05;
+            }
+        }
+
+        function fireBullet() {
+            if (wideShot) {
+                for (let i = -1; i <= 1; i++) {
+                    createBullet(player.x + (i * 20), player.y - 20, i * 50);
+                }
+            } else {
+                createBullet(player.x, player.y - 20, 0);
+            }
+        }
+
+        function createBullet(x, y, velocityX) {
+            const bullet = this.add.rectangle(x, y, 4, 12, 0x00ffff);
+            this.physics.add.existing(bullet);
+            bullet.body.setVelocity(velocityX, -500);
+            bullets.add(bullet);
+        }
+
+        function updateBullets() {
+            bullets.children.entries.forEach(bullet => {
+                if (bullet.y < -10) {
+                    bullet.destroy();
+                }
+            });
+
+            enemyBullets.children.entries.forEach(bullet => {
+                if (bullet.y > 610) {
+                    bullet.destroy();
+                }
+            });
+        }
+
+        function updateEnemies(time, delta) {
+            enemies.children.entries.forEach(enemy => {
+                if (enemy.movePattern === 'zigzag') {
+                    enemy.zigzagTimer += delta;
+                    if (enemy.zigzagTimer > 500) {
+                        enemy.body.setVelocityX(enemy.body.velocity.x === 0 ? 
+                            (Math.random() > 0.5 ? 100 : -100) : -enemy.body.velocity.x);
+                        enemy.zigzagTimer = 0;
+                    }
+                } else if (enemy.movePattern === 'shooter') {
+                    enemy.shootTimer += delta;
+                    if (enemy.shootTimer > 1500) {
+                        fireEnemyBullet.call(this, enemy);
+                        enemy.shootTimer = 0;
+                    }
+                }
+            });
+        }
+
+        function fireEnemyBullet(enemy) {
+            const bullet = this.add.rectangle(enemy.x, enemy.y + 20, 6, 6, 0xff00ff);
+            this.physics.add.existing(bullet);
+            
+            const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, player.x, player.y);
+            this.physics.velocityFromRotation(angle, 250, bullet.body.velocity);
+            
+            enemyBullets.add(bullet);
+        }
+
+        function updateBoss(time, delta) {
+            if (!boss || !boss.active) return;
+
+            boss.moveTimer += delta;
+            boss.shootTimer += delta;
+
+            if (boss.moveTimer > 2000) {
+                const targetX = Phaser.Math.Between(100, 700);
+                this.tweens.add({
+                    targets: boss,
+                    x: targetX,
+                    duration: 1500,
+                    ease: 'Sine.easeInOut'
+                });
+                boss.moveTimer = 0;
+            }
+
+            const shootInterval = boss.phase === 1 ? 1000 : 700;
+            if (boss.shootTimer > shootInterval) {
+                fireBossPattern.call(this);
+                boss.shootTimer = 0;
+            }
+
+            if (boss.health < boss.maxHealth * 0.5 && boss.phase === 1) {
+                boss.phase = 2;
+            }
+
+            updateBossHealthBar();
+        }
+
+        function fireBossPattern() {
+            if (boss.phase === 1) {
+                for (let i = -2; i <= 2; i++) {
+                    const bullet = this.add.rectangle(boss.x + (i * 20), boss.y + 30, 8, 8, 0xff0000);
+                    this.physics.add.existing(bullet);
+                    bullet.body.setVelocity(i * 50, 300);
+                    enemyBullets.add(bullet);
+                }
+            } else {
+                for (let angle = 0; angle < 360; angle += 30) {
+                    const bullet = this.add.rectangle(boss.x, boss.y, 8, 8, 0xff00ff);
+                    this.physics.add.existing(bullet);
+                    const rad = Phaser.Math.DegToRad(angle);
+                    bullet.body.setVelocity(Math.cos(rad) * 200, Math.sin(rad) * 200);
+                    enemyBullets.add(bullet);
+                }
+            }
+        }
+
+        function updatePowerUps() {
+            powerUps.children.entries.forEach(powerUp => {
+                powerUp.rotation += 0.05;
+            });
+        }
+
+        function updateCombo(time) {
+            if (time - lastKillTime > 3000 && comboMultiplier > 1) {
+                comboMultiplier = 1;
+                comboText.setText('');
+            }
+        }
+
+        function cleanupOffscreen() {
+            enemies.children.entries.forEach(enemy => {
+                if (enemy.y > 650) {
+                    enemy.destroy();
+                }
+            });
+
+            powerUps.children.entries.forEach(powerUp => {
+                if (powerUp.y > 650) {
+                    powerUp.destroy();
+                }
+            });
+        }
+
+        function hitEnemy(bullet, enemy) {
+            bullet.destroy();
+            enemy.health--;
+
+            createExplosion.call(this, enemy.x, enemy.y, 0xffff00, 5);
+
+            if (enemy.health <= 0) {
+                const points = 100 * comboMultiplier;
+                score += points;
+                scoreText.setText('Score: ' + score);
+
+                comboMultiplier = Math.min(comboMultiplier + 0.5, 5);
+                lastKillTime = this.time.now;
+                comboText.setText('x' + comboMultiplier.toFixed(1));
+
+                createExplosion.call(this, enemy.x, enemy.y, 0xff6600, 15);
+                this.cameras.main.shake(100, 0.005);
+
+                if (Math.random() < 0.2) {
+                    spawnPowerUp.call(this, enemy.x, enemy.y);
+                }
+
+                enemy.destroy();
+            }
+        }
+
+        function hitBoss(bullet, boss) {
+            bullet.destroy();
+            boss.health -= 2;
+
+            createExplosion.call(this, bullet.x, bullet.y, 0xffff00, 8);
+
+            if (boss.health <= 0) {
+                score += 5000 * level;
+                scoreText.setText('Score: ' + score);
+
+                createExplosion.call(this, boss.x, boss.y, 0xff0000, 30);
+                this.cameras.main.shake(300, 0.01);
+
+                boss.destroy();
+                bossHealthBar.destroy();
+                bossHealthBarBg.destroy();
+                bossHealthText.destroy();
+
+                isBossLevel = false;
+                level++;
+                levelText.setText('Level: ' + level);
+                enemyWaveCount = 0;
+
+                this.time.delayedCall(3000, () => {
+                    startEnemySpawn.call(this);
+                });
+            }
+        }
+
+        function hitPlayer(player, enemy) {
+            if (shieldActive) {
+                enemy.destroy();
+                createExplosion.call(this, enemy.x, enemy.y, 0xff6600, 10);
+                return;
+            }
+
+            damagePlayer.call(this, 20);
+            enemy.destroy();
+            createExplosion.call(this, enemy.x, enemy.y, 0xff6600, 10);
+        }
+
+        function hitPlayerBullet(player, bullet) {
+            if (shieldActive) {
+                bullet.destroy();
+                createExplosion.call(this, bullet.x, bullet.y, 0x00ffff, 5);
+                return;
+            }
+
+            damagePlayer.call(this, 10);
+            bullet.destroy();
+            createExplosion.call(this, bullet.x, bullet.y, 0x00ffff, 5);
+        }
+
+        function damagePlayer(damage) {
+            player.health -= damage;
+            this.cameras.main.shake(200, 0.01);
+
+            if (player.health <= 0) {
+                lives--;
+                livesText.setText('Lives: ' + lives);
+
+                if (lives <= 0) {
+                    endGame.call(this);
+                } else {
+                    player.health = player.maxHealth;
+                    player.x = 400;
+                    player.y = 500;
+                    
+                    player.alpha = 0.5;
+                    this.time.delayedCall(2000, () => {
+                        player.alpha = 1;
+                    });
+                }
+            }
+        }
+
+        function spawnPowerUp(x, y) {
+            const type = Phaser.Utils.Array.GetRandom(powerUpTypes);
+            const powerUp = this.add.graphics();
+            powerUp.x = x;
+            powerUp.y = y;
+            powerUp.powerUpType = type;
+
+            drawPowerUp(powerUp, type);
+
+            this.physics.add.existing(powerUp);
+            powerUp.body.setSize(30, 30);
+            powerUp.body.setVelocityY(100);
+
+            powerUps.add(powerUp);
+        }
+
+        function drawPowerUp(graphics, type) {
+            graphics.clear();
+            
+            if (type === 'rapid') {
+                graphics.fillStyle(0xffff00, 1);
+                graphics.fillCircle(0, 0, 15);
+                graphics.lineStyle(2, 0xff6600, 1);
+                graphics.strokeCircle(0, 0, 15);
+                graphics.fillStyle(0xff0000, 1);
+                graphics.fillRect(-8, -2, 16, 4);
+            } else if (type === 'wide') {
+                graphics.fillStyle(0x00ff00, 1);
+                graphics.fillRect(-15, -15, 30, 30);
+                graphics.lineStyle(2, 0x00ffff, 1);
+                graphics.strokeRect(-15, -15, 30, 30);
+                graphics.fillStyle(0xffff00, 1);
+                graphics.fillTriangle(-10, 0, 0, -8, 10, 0);
+                graphics.fillTriangle(-10, 0, 0, 8, 10, 0);
+            } else if (type === 'shield') {
+                graphics.fillStyle(0x00ffff, 1);
+                graphics.fillCircle(0, 0, 15);
+                graphics.lineStyle(3, 0x0000ff, 1);
+                graphics.strokeCircle(0, 0, 15);
+                graphics.lineStyle(2, 0xffffff, 1);
+                graphics.strokeCircle(0, 0, 10);
+            }
+        }
+
+        function collectPowerUp(player, powerUp) {
+            activatePowerUp.call(this, powerUp.powerUpType);
+            powerUp.destroy();
+            createExplosion.call(this, powerUp.x, powerUp.y, 0x00ff00, 10);
+        }
+
+        function activatePowerUp(type) {
+            deactivatePowerUp();
+
+            activePowerUp = type;
+            powerUpEndTime = this.time.now + 8000;
+
+            if (type === 'rapid') {
+                fireRate = 100;
+            } else if (type === 'wide') {
+                wideShot = true;
+            } else if (type === 'shield') {
+                shieldActive = true;
+                shieldGraphic = this.add.graphics();
+                shieldGraphic.lineStyle(3, 0x00ffff, 0.6);
+                shieldGraphic.strokeCircle(0, 0, 40);
+                shieldGraphic.x = player.x;
+                shieldGraphic.y = player.y;
+                
+                this.tweens.add({
+                    targets: shieldGraphic,
+                    x: player.x,
+                    y: player.y,
+                    duration: 100,
+                    repeat: -1,
+                    onUpdate: () => {
+                        if (shieldGraphic) {
+                            shieldGraphic.x = player.x;
+                            shieldGraphic.y = player.y;
+                        }
+                    }
+                });
+            }
+        }
+
+        function deactivatePowerUp() {
+            if (!activePowerUp) return;
+
+            if (activePowerUp === 'rapid') {
+                fireRate = 200;
+            } else if (activePowerUp === 'wide') {
+                wideShot = false;
+            } else if (activePowerUp === 'shield') {
+                shieldActive = false;
+                if (shieldGraphic) {
+                    shieldGraphic.destroy();
+                    shieldGraphic = null;
+                }
+            }
+
+            activePowerUp = null;
+        }
+
+        function createExplosion(x, y, color, count) {
+            for (let i = 0; i < count; i++) {
+                const particle = this.add.rectangle(x, y, 4, 4, color);
+                this.physics.add.existing(particle);
+                
+                const angle = Phaser.Math.Between(0, 360);
+                const speed = Phaser.Math.Between(50, 200);
+                const rad = Phaser.Math.DegToRad(angle);
+                
+                particle.body.setVelocity(
+                    Math.cos(rad) * speed,
+                    Math.sin(rad) * speed
+                );
+
+                this.tweens.add({
+                    targets: particle,
+                    alpha: 0,
+                    duration: 500,
+                    onComplete: () => particle.destroy()
+                });
+            }
+        }
+
+        function endGame() {
+            gameOver = true;
+            
+            if (enemySpawnTimer) {
+                enemySpawnTimer.remove();
+            }
+
+            enemies.children.entries.forEach(enemy => enemy.destroy());
+            enemyBullets.children.entries.forEach(bullet

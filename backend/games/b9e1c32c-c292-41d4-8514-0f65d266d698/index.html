@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nebula Navigator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #0a0a0a;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 2px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <script>
+        class StartScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'StartScene' });
+            }
+
+            create() {
+                this.add.rectangle(400, 300, 800, 600, 0x001122);
+                
+                const titleText = this.add.text(400, 150, 'NEBULA NAVIGATOR', {
+                    fontSize: '48px',
+                    fill: '#00ffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                const instructionsText = this.add.text(400, 250, 
+                    'WASD/Arrow Keys - Move\nSpace - Shoot\nShift - Dash\n\nSurvive and collect energy orbs!', {
+                    fontSize: '20px',
+                    fill: '#ffffff',
+                    align: 'center',
+                    lineSpacing: 10
+                }).setOrigin(0.5);
+
+                const startButton = this.add.rectangle(400, 400, 200, 60, 0x0066cc);
+                const startText = this.add.text(400, 400, 'START GAME', {
+                    fontSize: '24px',
+                    fill: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                startButton.setInteractive();
+                startButton.on('pointerdown', () => {
+                    this.scene.start('GameScene');
+                });
+
+                startButton.on('pointerover', () => {
+                    startButton.setFillStyle(0x0088ff);
+                });
+
+                startButton.on('pointerout', () => {
+                    startButton.setFillStyle(0x0066cc);
+                });
+            }
+        }
+
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+                this.score = 0;
+                this.health = 3;
+                this.lastFire = 0;
+                this.fireRate = 250;
+                this.lastDash = 0;
+                this.dashCooldown = 3000;
+                this.dashDuration = 200;
+                this.isDashing = false;
+                this.isInvulnerable = false;
+                this.enemySpawnRate = 2000;
+                this.lastEnemySpawn = 0;
+            }
+
+            create() {
+                this.physics.world.setBounds(0, 0, 800, 600);
+
+                // Create scrolling background
+                this.background = this.add.tileSprite(400, 300, 800, 600, null);
+                this.background.setTint(0x001122);
+                
+                // Create background graphics
+                const bgGraphics = this.add.graphics();
+                bgGraphics.fillStyle(0x002244);
+                for (let i = 0; i < 50; i++) {
+                    const x = Phaser.Math.Between(0, 800);
+                    const y = Phaser.Math.Between(0, 600);
+                    const size = Phaser.Math.Between(1, 3);
+                    bgGraphics.fillCircle(x, y, size);
+                }
+
+                // Create player
+                this.player = this.physics.add.sprite(400, 500, null);
+                this.player.setSize(20, 20);
+                this.player.setCollideWorldBounds(true);
+                this.player.setDrag(300);
+
+                // Create groups
+                this.playerBullets = this.physics.add.group();
+                this.enemies = this.physics.add.group();
+                this.enemyBullets = this.physics.add.group();
+                this.energyOrbs = this.physics.add.group();
+                this.explosions = this.physics.add.group();
+
+                // Create input
+                this.cursors = this.input.keyboard.createCursorKeys();
+                this.wasd = this.input.keyboard.addKeys('W,S,A,D,SPACE,SHIFT');
+
+                // Create UI
+                this.scoreText = this.add.text(16, 16, 'Score: 0', {
+                    fontSize: '24px',
+                    fill: '#ffffff'
+                });
+
+                this.healthText = this.add.text(16, 50, 'Health: ♥♥♥', {
+                    fontSize: '24px',
+                    fill: '#ff0000'
+                });
+
+                this.dashCooldownText = this.add.text(16, 84, 'Dash: Ready', {
+                    fontSize: '18px',
+                    fill: '#00ff00'
+                });
+
+                // Setup collisions
+                this.physics.add.overlap(this.playerBullets, this.enemies, this.hitEnemy, null, this);
+                this.physics.add.overlap(this.player, this.enemies, this.hitPlayer, null, this);
+                this.physics.add.overlap(this.player, this.enemyBullets, this.hitPlayer, null, this);
+                this.physics.add.overlap(this.player, this.energyOrbs, this.collectOrb, null, this);
+
+                // Create particles
+                this.explosionParticles = this.add.particles(0, 0, null, {
+                    speed: { min: 50, max: 150 },
+                    scale: { start: 0.3, end: 0 },
+                    lifespan: 300,
+                    emitting: false
+                });
+
+                this.dashParticles = this.add.particles(0, 0, null, {
+                    speed: { min: 20, max: 50 },
+                    scale: { start: 0.2, end: 0 },
+                    lifespan: 200,
+                    emitting: false
+                });
+            }
+
+            update(time, delta) {
+                if (this.health <= 0) {
+                    this.scene.start('GameOverScene', { score: this.score });
+                    return;
+                }
+
+                this.handleInput(time);
+                this.updateEnemies(time);
+                this.spawnEnemies(time);
+                this.updateUI(time);
+                this.cleanupObjects();
+
+                // Scroll background
+                this.background.tilePositionY -= 0.5;
+
+                // Increase difficulty over time
+                if (time > 10000) this.enemySpawnRate = Math.max(800, this.enemySpawnRate - delta * 0.1);
+            }
+
+            handleInput(time) {
+                const speed = this.isDashing ? 600 : 300;
+                
+                if (this.cursors.left.isDown || this.wasd.A.isDown) {
+                    this.player.setVelocityX(-speed);
+                } else if (this.cursors.right.isDown || this.wasd.D.isDown) {
+                    this.player.setVelocityX(speed);
+                } else {
+                    this.player.setVelocityX(0);
+                }
+
+                if (this.cursors.up.isDown || this.wasd.W.isDown) {
+                    this.player.setVelocityY(-speed);
+                } else if (this.cursors.down.isDown || this.wasd.S.isDown) {
+                    this.player.setVelocityY(speed);
+                } else {
+                    this.player.setVelocityY(0);
+                }
+
+                // Shooting
+                if ((this.cursors.space.isDown || this.wasd.SPACE.isDown) && time > this.lastFire + this.fireRate) {
+                    this.fireBullet();
+                    this.lastFire = time;
+                }
+
+                // Dash
+                if (this.wasd.SHIFT.isDown && time > this.lastDash + this.dashCooldown) {
+                    this.dash(time);
+                }
+
+                // Update dash state
+                if (this.isDashing && time > this.lastDash + this.dashDuration) {
+                    this.isDashing = false;
+                    this.isInvulnerable = false;
+                }
+            }
+
+            fireBullet() {
+                const bullet = this.physics.add.sprite(this.player.x, this.player.y - 20, null);
+                bullet.setSize(4, 8);
+                bullet.setVelocityY(-400);
+                this.playerBullets.add(bullet);
+            }
+
+            dash(time) {
+                this.lastDash = time;
+                this.isDashing = true;
+                this.isInvulnerable = true;
+                this.dashParticles.emitParticleAt(this.player.x, this.player.y, 10);
+            }
+
+            spawnEnemies(time) {
+                if (time > this.lastEnemySpawn + this.enemySpawnRate) {
+                    const type = Phaser.Math.Between(0, 2);
+                    const x = Phaser.Math.Between(50, 750);
+                    
+                    const enemy = this.physics.add.sprite(x, -20, null);
+                    enemy.setSize(20, 20);
+                    enemy.enemyType = type;
+                    enemy.lastShot = 0;
+                    enemy.zigzagDirection = 1;
+                    
+                    switch (type) {
+                        case 0: // Basic Drone
+                            enemy.setVelocityY(100);
+                            break;
+                        case 1: // Zig-Zag Fighter
+                            enemy.setVelocityY(80);
+                            enemy.setVelocityX(60);
+                            break;
+                        case 2: // Kamikaze
+                            enemy.setVelocityY(200);
+                            break;
+                    }
+                    
+                    this.enemies.add(enemy);
+                    this.lastEnemySpawn = time;
+                }
+            }
+
+            updateEnemies(time) {
+                this.enemies.children.entries.forEach(enemy => {
+                    switch (enemy.enemyType) {
+                        case 0: // Basic Drone
+                            if (time > enemy.lastShot + 1500) {
+                                this.enemyShoot(enemy);
+                                enemy.lastShot = time;
+                            }
+                            break;
+                        case 1: // Zig-Zag Fighter
+                            if (enemy.x <= 50 || enemy.x >= 750) {
+                                enemy.zigzagDirection *= -1;
+                                enemy.setVelocityX(60 * enemy.zigzagDirection);
+                            }
+                            if (time > enemy.lastShot + 1000) {
+                                this.enemyShoot(enemy);
+                                enemy.lastShot = time;
+                            }
+                            break;
+                        case 2: // Kamikaze
+                            const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+                            enemy.setVelocity(Math.cos(angle) * 150, Math.sin(angle) * 150);
+                            break;
+                    }
+                });
+            }
+
+            enemyShoot(enemy) {
+                const bullet = this.physics.add.sprite(enemy.x, enemy.y + 20, null);
+                bullet.setSize(4, 6);
+                bullet.setVelocityY(200);
+                this.enemyBullets.add(bullet);
+            }
+
+            hitEnemy(bullet, enemy) {
+                bullet.destroy();
+                
+                // Create explosion
+                this.explosionParticles.emitParticleAt(enemy.x, enemy.y, 8);
+                
+                // Chance to drop energy orb
+                if (Math.random() < 0.3) {
+                    const orb = this.physics.add.sprite(enemy.x, enemy.y, null);
+                    orb.setSize(12, 12);
+                    orb.setVelocityY(50);
+                    this.energyOrbs.add(orb);
+                }
+                
+                enemy.destroy();
+                this.score += 100;
+            }
+
+            hitPlayer(player, object) {
+                if (this.isInvulnerable) return;
+                
+                object.destroy();
+                this.health--;
+                this.isInvulnerable = true;
+                
+                // Brief invulnerability
+                this.time.delayedCall(1000, () => {
+                    this.isInvulnerable = false;
+                });
+                
+                // Visual feedback
+                this.player.setTint(0xff0000);
+                this.time.delayedCall(200, () => {
+                    this.player.clearTint();
+                });
+            }
+
+            collectOrb(player, orb) {
+                orb.destroy();
+                this.score += 50;
+                this.dashCooldown = Math.max(1000, this.dashCooldown - 200);
+            }
+
+            updateUI(time) {
+                this.scoreText.setText('Score: ' + this.score);
+                
+                let healthDisplay = '';
+                for (let i = 0; i < this.health; i++) {
+                    healthDisplay += '♥';
+                }
+                this.healthText.setText('Health: ' + healthDisplay);
+                
+                const dashReady = time > this.lastDash + this.dashCooldown;
+                this.dashCooldownText.setText('Dash: ' + (dashReady ? 'Ready' : 'Cooldown'));
+                this.dashCooldownText.setColor(dashReady ? '#00ff00' : '#ff8800');
+            }
+
+            cleanupObjects() {
+                // Clean up bullets that are off-screen
+                this.playerBullets.children.entries.forEach(bullet => {
+                    if (bullet.y < -10) bullet.destroy();
+                });
+                
+                this.enemyBullets.children.entries.forEach(bullet => {
+                    if (bullet.y > 610) bullet.destroy();
+                });
+                
+                this.enemies.children.entries.forEach(enemy => {
+                    if (enemy.y > 610) enemy.destroy();
+                });
+                
+                this.energyOrbs.children.entries.forEach(orb => {
+                    if (orb.y > 610) orb.destroy();
+                });
+            }
+        }
+
+        class GameOverScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameOverScene' });
+            }
+
+            init(data) {
+                this.finalScore = data.score;
+            }
+
+            create() {
+                this.add.rectangle(400, 300, 800, 600, 0x001122);
+                
+                const gameOverText = this.add.text(400, 200, 'GAME OVER', {
+                    fontSize: '48px',
+                    fill: '#ff0000',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                const scoreText = this.add.text(400, 280, 'Final Score: ' + this.finalScore, {
+                    fontSize: '32px',
+                    fill: '#ffffff'
+                }).setOrigin(0.5);
+
+                const restartButton = this.add.rectangle(400, 380, 200, 60, 0x0066cc);
+                const restartText = this.add.text(400, 380, 'RESTART', {
+                    fontSize: '24px',
+                    fill: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                const menuButton = this.add.rectangle(400, 460, 200, 60, 0x666666);
+                const menuText = this.add.text(400, 460, 'MAIN MENU', {
+                    fontSize: '24px',
+                    fill: '#ffffff',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+
+                restartButton.setInteractive();
+                restartButton.on('pointerdown', () => {
+                    this.scene.start('GameScene');
+                });
+
+                menuButton.setInteractive();
+                menuButton.on('pointerdown', () => {
+                    this.scene.start('StartScene');
+                });
+
+                restartButton.on('pointerover', () => {
+                    restartButton.setFillStyle(0x0088ff);
+                });
+
+                restartButton.on('pointerout', () => {
+                    restartButton.setFillStyle(0x0066cc);
+                });
+
+                menuButton.on('pointerover', () => {
+                    menuButton.setFillStyle(0x888888);
+                });
+
+                menuButton.on('pointerout', () => {
+                    menuButton.setFillStyle(0x666666);
+                });
+            }
+        }
+
+        // Custom render functions for game objects
+        function renderPlayer(graphics, x, y, isDashing = false) {
+            graphics.clear();
+            graphics.fillStyle(isDashing ? 0x00ffff : 0x00ff00);
+            graphics.fillTriangle(x, y - 10, x - 8, y + 10, x + 8, y + 10);
+            graphics.fillStyle(0x0088ff);
+            graphics.fillRect(x - 2, y + 5, 4, 8);
+        }
+
+        function renderEnemy(graphics, x, y, type) {
+            graphics.clear();
+            switch (type) {
+                case 0: // Basic Drone
+                    graphics.fillStyle(0xff4444);
+                    graphics.fillRect(x - 10, y - 8, 20, 16);
+                    graphics.fillStyle(0xaa2222);
+                    graphics.fillRect(x - 6, y - 4, 12, 8);
+                    break;
+                case 1: // Zig-Zag Fighter
+                    graphics.fillStyle(0xffaa00);
+                    graphics.fillTriangle(x, y - 8, x - 12, y + 8, x + 12, y + 8);
+                    graphics.fillStyle(0xcc8800);
+                    graphics.fillCircle(x, y, 4);
+                    break;
+                case 2: // Kamikaze
+                    graphics.fillStyle(0xff0088);
+                    graphics.fillCircle(x, y, 10);
+                    graphics.fillStyle(0xaa0044);
+                    graphics.fillCircle(x, y, 6);
+                    break;
+            }
+        }
+
+        function renderBullet(graphics, x, y, isPlayer = true) {
+            graphics.clear();
+            graphics.fillStyle(isPlayer ? 0x00ffff : 0xff6600);
+            graphics.fillRect(x - 2, y - 4, 4, 8);
+        }
+
+        function renderEnergyOrb(graphics, x, y) {
+            graphics.clear();
+            graphics.fillStyle(0xffff00);
+            graphics.fillCircle(x, y, 6);
+            graphics.fillStyle(0xffff88);
+            graphics.fillCircle(x, y, 3);
+        }
+
+        // Extend the GameScene to include rendering
+        const originalCreate = GameScene.prototype.create;
+        GameScene.prototype.create = function() {
+            originalCreate.call(this);
+            
+            // Create graphics objects for rendering
+            this.playerGraphics = this.add.graphics();
+            this.enemyGraphics = this.add.graphics();
+            this.bulletGraphics = this.add.graphics();
+            this.orbGraphics = this.add.graphics();
+        };
+
+        const originalUpdate = GameScene.prototype.update;
+        GameScene.prototype.update = function(time, delta) {
+            originalUpdate.call(this, time, delta);
+            
+            // Render player
+            renderPlayer(this.playerGraphics, this.player.x, this.player.y, this.isDashing);
+            
+            // Render enemies
+            this.enemyGraphics.clear();
+            this.enemies.children.entries.forEach(enemy => {
+                renderEnemy(this.enemyGraphics, enemy.x, enemy.y, enemy.enemyType);
+            });
+            
+            // Render bullets
+            this.bulletGraphics.clear();
+            this.playerBullets.children.entries.forEach(bullet => {
+                renderBullet(this.bulletGraphics, bullet.x, bullet.y, true);
+            });
+            this.enemyBullets.children.entries.forEach(bullet => {
+                renderBullet(this.bulletGraphics, bullet.x, bullet.y, false);
+            });
+            
+            // Render energy orbs
+            this.orbGraphics.clear();
+            this.energyOrbs.children.entries.forEach(orb => {
+                renderEnergyOrb(this.orbGraphics, orb.x, orb.y);
+            });
+        };
+
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: [StartScene, GameScene, GameOverScene]
+        };
+
+        const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>

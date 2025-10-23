@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Word Guesser</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f0f0f0;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        const WORDS = [
+            "JAVASCRIPT", "PHASER", "PROGRAMMING", "DEVELOPER", 
+            "CANVAS", "PUZZLE", "COMPUTER", "KEYBOARD", 
+            "BROWSER", "INTERNET", "ALGORITHM", "FUNCTION"
+        ];
+
+        class TitleScene extends Phaser.Scene {
+            constructor() {
+                super('TitleScene');
+            }
+            
+            create() {
+                const centerX = this.sys.game.config.width / 2;
+                const centerY = this.sys.game.config.height / 2;
+                
+                // Title
+                this.add.text(centerX, centerY - 100, 'WORD GUESSER', {
+                    fontSize: '48px',
+                    fill: '#000',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+                
+                // Start button
+                const startButton = this.add.rectangle(centerX, centerY + 50, 200, 60, 0x4CAF50);
+                startButton.setInteractive();
+                startButton.on('pointerdown', () => {
+                    this.scene.start('GameScene');
+                });
+                
+                // Start text
+                this.add.text(centerX, centerY + 50, 'START GAME', {
+                    fontSize: '24px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+                
+                // Instructions
+                this.add.text(centerX, centerY + 150, 'Guess the hidden word by choosing letters.', {
+                    fontSize: '16px',
+                    fill: '#000'
+                }).setOrigin(0.5);
+                
+                this.add.text(centerX, centerY + 180, 'You have limited attempts. Good luck!', {
+                    fontSize: '16px',
+                    fill: '#000'
+                }).setOrigin(0.5);
+            }
+        }
+
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super('GameScene');
+            }
+            
+            init() {
+                this.word = WORDS[Math.floor(Math.random() * WORDS.length)];
+                this.guessedLetters = new Set();
+                this.maxAttempts = 7;
+                this.incorrectAttempts = 0;
+                this.gameOver = false;
+            }
+            
+            create() {
+                const centerX = this.sys.game.config.width / 2;
+                
+                // Title
+                this.add.text(centerX, 50, 'Word Guesser', {
+                    fontSize: '32px',
+                    fill: '#000',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+                
+                // Display for word
+                this.wordText = this.add.text(centerX, 120, this.getDisplayWord(), {
+                    fontSize: '28px',
+                    fill: '#000',
+                    fontFamily: 'monospace',
+                    letterSpacing: 8
+                }).setOrigin(0.5);
+                
+                // Attempts left
+                this.attemptsText = this.add.text(centerX, 180, `Attempts left: ${this.maxAttempts - this.incorrectAttempts}`, {
+                    fontSize: '20px',
+                    fill: '#000'
+                }).setOrigin(0.5);
+                
+                // Guessed letters
+                this.guessedText = this.add.text(centerX, 220, 'Used letters: ', {
+                    fontSize: '18px',
+                    fill: '#555'
+                }).setOrigin(0.5);
+                
+                // Create hangman figure container
+                this.hangmanGraphics = this.add.graphics({ x: centerX - 100, y: 280 });
+                
+                // Add keyboard
+                this.createKeyboard();
+                
+                // Add restart button
+                this.createRestartButton();
+                
+                // Add game message
+                this.messageText = this.add.text(centerX, 460, '', {
+                    fontSize: '24px',
+                    fill: '#000',
+                    fontStyle: 'bold'
+                }).setOrigin(0.5);
+            }
+            
+            createKeyboard() {
+                const keyboardX = this.sys.game.config.width / 2 - 130;
+                const keyboardY = 300;
+                const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                const buttonWidth = 40;
+                const buttonHeight = 40;
+                const buttonPadding = 5;
+                let keyButtons = [];
+                
+                for (let i = 0; i < letters.length; i++) {
+                    const letter = letters[i];
+                    const row = Math.floor(i / 7);
+                    const col = i % 7;
+                    
+                    const x = keyboardX + col * (buttonWidth + buttonPadding);
+                    const y = keyboardY + row * (buttonHeight + buttonPadding);
+                    
+                    const button = this.add.rectangle(x, y, buttonWidth, buttonHeight, 0x6495ED);
+                    button.setInteractive();
+                    
+                    const text = this.add.text(x, y, letter, {
+                        fontSize: '20px',
+                        fill: '#fff'
+                    }).setOrigin(0.5);
+                    
+                    button.letter = letter;
+                    keyButtons.push({ button, text });
+                    
+                    button.on('pointerdown', () => {
+                        if (!this.gameOver && !this.guessedLetters.has(letter)) {
+                            this.processGuess(letter);
+                            button.setFillStyle(0xCCCCCC);
+                            button.disableInteractive();
+                        }
+                    });
+                }
+                
+                this.keyButtons = keyButtons;
+            }
+            
+            createRestartButton() {
+                const centerX = this.sys.game.config.width / 2;
+                
+                const restartButton = this.add.rectangle(centerX, 500, 150, 50, 0xF44336);
+                restartButton.setInteractive();
+                
+                const restartText = this.add.text(centerX, 500, 'RESTART', {
+                    fontSize: '18px',
+                    fill: '#fff'
+                }).setOrigin(0.5);
+                
+                restartButton.on('pointerdown', () => {
+                    this.scene.restart();
+                });
+            }
+            
+            processGuess(letter) {
+                this.guessedLetters.add(letter);
+                
+                // Update guessed letters text
+                this.guessedText.setText('Used letters: ' + Array.from(this.guessedLetters).join(', '));
+                
+                // Check if letter is in the word
+                if (this.word.includes(letter)) {
+                    // Correct guess
+                    this.wordText.setText(this.getDisplayWord());
+                    
+                    // Check for win
+                    if (!this.getDisplayWord().includes('_')) {
+                        this.endGame(true);
+                    }
+                } else {
+                    // Incorrect guess
+                    this.incorrectAttempts++;
+                    this.attemptsText.setText(`Attempts left: ${this.maxAttempts - this.incorrectAttempts}`);
+                    this.updateHangman();
+                    
+                    // Check for loss
+                    if (this.incorrectAttempts >= this.maxAttempts) {
+                        this.endGame(false);
+                    }
+                }
+            }
+            
+            getDisplayWord() {
+                return this.word.split('').map(letter => 
+                    this.guessedLetters.has(letter) ? letter : '_'
+                ).join(' ');
+            }
+            
+            updateHangman() {
+                this.hangmanGraphics.clear();
+                this.hangmanGraphics.lineStyle(4, 0x000000);
+                
+                // Draw different parts based on incorrect attempts
+                if (this.incorrectAttempts >= 1) {
+                    // Base
+                    this.hangmanGraphics.strokeRect(0, 120, 80, 10);
+                }
+                if (this.incorrectAttempts >= 2) {
+                    // Pole
+                    this.hangmanGraphics.beginPath();
+                    this.hangmanGraphics.moveTo(40, 120);
+                    this.hangmanGraphics.lineTo(40, 0);
+                    this.hangmanGraphics.stroke();
+                }
+                if (this.incorrectAttempts >= 3) {
+                    // Top beam
+                    this.hangmanGraphics.beginPath();
+                    this.hangmanGraphics.moveTo(40, 0);
+                    this.hangmanGraphics.lineTo(120, 0);
+                    this.hangmanGraphics.stroke();
+                }
+                if (this.incorrectAttempts >= 4) {
+                    // Rope
+                    this.hangmanGraphics.beginPath();
+                    this.hangmanGraphics.moveTo(120, 0);
+                    this.hangmanGraphics.lineTo(120, 20);
+                    this.hangmanGraphics.stroke();
+                }
+                if (this.incorrectAttempts >= 5) {
+                    // Head
+                    this.hangmanGraphics.strokeCircle(120, 30, 10);
+                }
+                if (this.incorrectAttempts >= 6) {
+                    // Body
+                    this.hangmanGraphics.beginPath();
+                    this.hangmanGraphics.moveTo(120, 40);
+                    this.hangmanGraphics.lineTo(120, 80);
+                    this.hangmanGraphics.stroke();
+                }
+                if (this.incorrectAttempts >= 7) {
+                    // Arms and legs
+                    this.hangmanGraphics.beginPath();
+                    this.hangmanGraphics.moveTo(120, 50);
+                    this.hangmanGraphics.lineTo(100, 65);
+                    this.hangmanGraphics.moveTo(120, 50);
+                    this.hangmanGraphics.lineTo(140, 65);
+                    this.hangmanGraphics.moveTo(120, 80);
+                    this.hangmanGraphics.lineTo(100, 100);
+                    this.hangmanGraphics.moveTo(120, 80);
+                    this.hangmanGraphics.lineTo(140, 100);
+                    this.hangmanGraphics.stroke();
+                }
+            }
+            
+            endGame(isWin) {
+                this.gameOver = true;
+                
+                if (isWin) {
+                    this.messageText.setText('You Won!').setFill('#4CAF50');
+                } else {
+                    this.messageText.setText(`Game Over! The word was: ${this.word}`).setFill('#F44336');
+                    this.wordText.setText(this.word);
+                }
+                
+                // Disable all letter buttons
+                this.keyButtons.forEach(({ button }) => {
+                    button.disableInteractive();
+                    button.setFillStyle(0xCCCCCC);
+                });
+            }
+        }
+
+        const config = {
+            type: Phaser.AUTO,
+            width: 600,
+            height: 560,
+            backgroundColor: '#FFFFFF',
+            scene: [TitleScene, GameScene]
+        };
+
+        new Phaser.Game(config);
+    </script>
+</body>
+</html>

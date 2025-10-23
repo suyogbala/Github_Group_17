@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cosmic Hangman</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0c0c2e, #1a1a4a);
+            font-family: 'Courier New', monospace;
+        }
+        canvas {
+            border: 2px solid #00ffff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <script>
+        class CosmicHangmanScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'CosmicHangmanScene' });
+                this.words = [
+                    'NEBULA', 'GALAXY', 'ASTEROID', 'EXOPLANET', 'TELESCOPE',
+                    'SATELLITE', 'CONSTELLATION', 'BLACKHOLE', 'SUPERNOVA', 
+                    'ORBIT', 'COMET', 'PULSAR', 'QUASAR', 'METEOR', 'COSMOS'
+                ];
+                this.currentWord = '';
+                this.guessedLetters = [];
+                this.wrongGuesses = 0;
+                this.maxWrongGuesses = 6;
+                this.gameState = 'playing';
+                this.letterButtons = {};
+                this.score = 0;
+                this.level = 1;
+            }
+
+            preload() {
+                this.load.audio('correctSound', ['data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmEcBzyT1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz2T1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz2T1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz']);
+                this.load.audio('wrongSound', ['data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmEcBzyT1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz2T1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz2T1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz']);
+                this.load.audio('winSound', ['data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmEcBzyT1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz2T1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz2T1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz']);
+                this.load.audio('loseSound', ['data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSsFJHfH8N2QQAoUXrTp66hVFApGn+DyvmEcBzyT1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz2T1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz2T1/LNeSsFJHXG8N2QQAoUXbTp66hVFApGoeHyvmEcBz']);
+            }
+
+            create() {
+                this.cameras.main.setBackgroundColor('#0a0a2e');
+                
+                this.add.text(400, 30, 'COSMIC HANGMAN', {
+                    fontSize: '32px',
+                    fill: '#00ffff',
+                    fontFamily: 'Courier New',
+                    stroke: '#ffffff',
+                    strokeThickness: 2
+                }).setOrigin(0.5);
+
+                this.scoreText = this.add.text(50, 80, `Score: ${this.score}`, {
+                    fontSize: '20px',
+                    fill: '#ffffff',
+                    fontFamily: 'Courier New'
+                });
+
+                this.levelText = this.add.text(650, 80, `Level: ${this.level}`, {
+                    fontSize: '20px',
+                    fill: '#ffffff',
+                    fontFamily: 'Courier New'
+                });
+
+                this.createStars();
+                this.initializeGame();
+                this.createLetterButtons();
+                this.createAstronaut();
+                this.createOxygenMeter();
+                
+                this.input.keyboard.on('keydown', (event) => {
+                    if (this.gameState === 'playing' && event.key.match(/[a-zA-Z]/)) {
+                        this.guessLetter(event.key.toUpperCase());
+                    } else if (event.key === ' ' && (this.gameState === 'won' || this.gameState === 'lost')) {
+                        this.restartGame();
+                    }
+                });
+
+                this.particles = this.add.particles(0, 0, 'particles', {
+                    scale: { start: 0.3, end: 0 },
+                    speed: { min: 50, max: 100 },
+                    lifespan: 300,
+                    emitting: false
+                });
+            }
+
+            createStars() {
+                for (let i = 0; i < 100; i++) {
+                    const x = Phaser.Math.Between(0, 800);
+                    const y = Phaser.Math.Between(0, 600);
+                    const star = this.add.circle(x, y, Phaser.Math.Between(1, 3), 0xffffff, 0.7);
+                    this.tweens.add({
+                        targets: star,
+                        alpha: 0.2,
+                        duration: Phaser.Math.Between(1000, 3000),
+                        yoyo: true,
+                        repeat: -1,
+                        ease: 'Sine.easeInOut'
+                    });
+                }
+            }
+
+            initializeGame() {
+                this.currentWord = this.words[Math.floor(Math.random() * this.words.length)];
+                this.guessedLetters = [];
+                this.wrongGuesses = 0;
+                this.gameState = 'playing';
+                
+                this.updateWordDisplay();
+                this.updateGuessedLetters();
+            }
+
+            createLetterButtons() {
+                const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                const buttonsPerRow = 7;
+                const buttonWidth = 40;
+                const buttonHeight = 40;
+                const startX = 150;
+                const startY = 450;
+                const spacingX = 50;
+                const spacingY = 60;
+
+                for (let i = 0; i < alphabet.length; i++) {
+                    const letter = alphabet[i];
+                    const row = Math.floor(i / buttonsPerRow);
+                    const col = i % buttonsPerRow;
+                    const x = startX + col * spacingX;
+                    const y = startY + row * spacingY;
+
+                    const button = this.add.graphics();
+                    button.fillStyle(0x003366);
+                    button.fillRoundedRect(0, 0, buttonWidth, buttonHeight, 8);
+                    button.lineStyle(2, 0x00ffff);
+                    button.strokeRoundedRect(0, 0, buttonWidth, buttonHeight, 8);
+                    button.setPosition(x, y);
+
+                    const buttonText = this.add.text(x + buttonWidth/2, y + buttonHeight/2, letter, {
+                        fontSize: '20px',
+                        fill: '#ffffff',
+                        fontFamily: 'Courier New'
+                    }).setOrigin(0.5);
+
+                    const buttonContainer = this.add.container(0, 0, [button, buttonText]);
+                    buttonContainer.setSize(buttonWidth, buttonHeight);
+                    buttonContainer.setInteractive(new Phaser.Geom.Rectangle(x, y, buttonWidth, buttonHeight), Phaser.Geom.Rectangle.Contains);
+                    
+                    buttonContainer.on('pointerdown', () => {
+                        if (this.gameState === 'playing' && !this.guessedLetters.includes(letter)) {
+                            this.guessLetter(letter);
+                        }
+                    });
+
+                    buttonContainer.on('pointerover', () => {
+                        if (!this.guessedLetters.includes(letter)) {
+                            button.clear();
+                            button.fillStyle(0x004488);
+                            button.fillRoundedRect(0, 0, buttonWidth, buttonHeight, 8);
+                            button.lineStyle(2, 0x00ffff);
+                            button.strokeRoundedRect(0, 0, buttonWidth, buttonHeight, 8);
+                        }
+                    });
+
+                    buttonContainer.on('pointerout', () => {
+                        if (!this.guessedLetters.includes(letter)) {
+                            button.clear();
+                            button.fillStyle(0x003366);
+                            button.fillRoundedRect(0, 0, buttonWidth, buttonHeight, 8);
+                            button.lineStyle(2, 0x00ffff);
+                            button.strokeRoundedRect(0, 0, buttonWidth, buttonHeight, 8);
+                        }
+                    });
+
+                    this.letterButtons[letter] = { button, text: buttonText, container: buttonContainer };
+                }
+            }
+
+            createAstronaut() {
+                this.astronautGraphics = this.add.graphics();
+                this.astronautParts = [];
+            }
+
+            createOxygenMeter() {
+                this.oxygenMeterBg = this.add.graphics();
+                this.oxygenMeterBg.lineStyle(2, 0x666666);
+                this.oxygenMeterBg.strokeRect(520, 120, 200, 30);
+                
+                this.oxygenMeter = this.add.graphics();
+                this.updateOxygenMeter();
+
+                this.add.text(530, 100, 'OXYGEN LEVEL', {
+                    fontSize: '16px',
+                    fill: '#00ffff',
+                    fontFamily: 'Courier New'
+                });
+            }
+
+            updateOxygenMeter() {
+                this.oxygenMeter.clear();
+                const remaining = (this.maxWrongGuesses - this.wrongGuesses) / this.maxWrongGuesses;
+                const width = 196 * remaining;
+                
+                let color = 0x00ff00;
+                if (remaining < 0.5) color = 0xffff00;
+                if (remaining < 0.25) color = 0xff0000;
+                
+                this.oxygenMeter.fillStyle(color);
+                this.oxygenMeter.fillRect(522, 122, width, 26);
+            }
+
+            guessLetter(letter) {
+                if (this.guessedLetters.includes(letter) || this.gameState !== 'playing') return;
+
+                this.guessedLetters.push(letter);
+                
+                const button = this.letterButtons[letter];
+                button.button.clear();
+                
+                if (this.currentWord.includes(letter)) {
+                    this.sound.play('correctSound');
+                    button.button.fillStyle(0x006600);
+                    button.button.fillRoundedRect(0, 0, 40, 40, 8);
+                    button.button.lineStyle(2, 0x00ff00);
+                    button.button.strokeRoundedRect(0, 0, 40, 40, 8);
+                    
+                    this.particles.setPosition(button.container.x + 20, button.container.y + 20);
+                    this.particles.explode(10);
+                    
+                    this.score += 10;
+                } else {
+                    this.sound.play('wrongSound');
+                    this.wrongGuesses++;
+                    button.button.fillStyle(0x660000);
+                    button.button.fillRoundedRect(0, 0, 40, 40, 8);
+                    button.button.lineStyle(2, 0xff0000);
+                    button.button.strokeRoundedRect(0, 0, 40, 40, 8);
+                    
+                    this.cameras.main.shake(200, 0.01);
+                    this.drawAstronautPart();
+                    this.updateOxygenMeter();
+                }
+
+                this.updateWordDisplay();
+                this.updateGuessedLetters();
+                this.updateScore();
+                this.checkGameEnd();
+            }
+
+            drawAstronautPart() {
+                const x = 100;
+                const y = 200;
+                
+                this.astronautGraphics.lineStyle(3, 0x00ffff);
+                
+                switch(this.wrongGuesses) {
+                    case 1:
+                        this.astronautGraphics.strokeCircle(x, y, 25);
+                        break;
+                    case 2:
+                        this.astronautGraphics.fillStyle(0x444444);
+                        this.astronautGraphics.fillCircle(x, y, 35);
+                        this.astronautGraphics.lineStyle(2, 0x00ffff);
+                        this.astronautGraphics.strokeCircle(x, y, 35);
+                        break;
+                    case 3:
+                        this.astronautGraphics.lineStyle(4, 0x00ffff);
+                        this.astronautGraphics.lineBetween(x, y + 35, x, y + 120);
+                        break;
+                    case 4:
+                        this.astronautGraphics.lineBetween(x, y + 50, x - 40, y + 90);
+                        break;
+                    case 5:
+                        this.astronautGraphics.lineBetween(x, y + 50, x + 40, y + 90);
+                        break;
+                    case 6:
+                        this.astronautGraphics.lineBetween(x, y + 120, x - 30, y + 160);
+                        this.astronautGraphics.lineBetween(x, y + 120, x + 30, y + 160);
+                        break;
+                }
+            }
+
+            updateWordDisplay() {
+                if (this.wordText) this.wordText.destroy();
+                
+                let display = '';
+                for (let i = 0; i < this.currentWord.length; i++) {
+                    const letter = this.currentWord[i];
+                    if (this.guessedLetters.includes(letter)) {
+                        display += letter + ' ';
+                    } else {
+                        display += '_ ';
+                    }
+                }
+                
+                this.wordText = this.add.text(400, 180, display.trim(), {
+                    fontSize: '36px',
+                    fill: '#ffffff',
+                    fontFamily: 'Courier New',
+                    letterSpacing: '4px'
+                }).setOrigin(0.5);
+            }
+
+            updateGuessedLetters() {
+                if (this.guessedText) this.guessedText.destroy();
+                
+                const wrongLetters = this.guessedLetters.filter(letter => !this.currentWord.includes(letter));
+                if (wrongLetters.length > 0) {
+                    this.guessedText = this.add.text(400, 220, `Wrong letters: ${wrongLetters.join(', ')}`, {
+                        fontSize: '18px',
+                        fill: '#ff6666',
+                        fontFamily: 'Courier New'
+                    }).setOrigin(0.5);
+                }
+            }
+
+            updateScore() {
+                this.scoreText.setText(`Score: ${this.score}`);
+            }
+
+            checkGameEnd() {
+                const wordComplete = this.currentWord.split('').every(letter => this.guessedLetters.includes(letter));
+                
+                if (wordComplete) {
+                    this.gameState = 'won';
+                    this.sound.play('winSound');
+                    this.score += 50 + (this.maxWrongGuesses - this.wrongGuesses) * 10;
+                    this.updateScore();
+                    
+                    this.add.text(400, 280, 'YOU WIN!', {
+                        fontSize: '48px',
+                        fill: '#00ff00',
+                        fontFamily: 'Courier New',
+                        stroke: '#ffffff',
+                        strokeThickness: 2
+                    }).setOrigin(0.5);
+                    
+                    this.add.text(400, 320, 'Press SPACE to play again', {
+                        fontSize: '20px',
+                        fill: '#ffffff',
+                        fontFamily: 'Courier New'
+                    }).setOrigin(0.5);
+                    
+                    this.particles.setPosition(400, 280);
+                    this.particles.explode(30);
+                    
+                } else if (this.wrongGuesses >= this.maxWrongGuesses) {
+                    this.gameState = 'lost';
+                    this.sound.play('loseSound');
+                    
+                    this.add.text(400, 280, 'GAME OVER!', {
+                        fontSize: '48px',
+                        fill: '#ff0000',
+                        fontFamily: 'Courier New',
+                        stroke: '#ffffff',
+                        strokeThickness: 2
+                    }).setOrigin(0.5);
+                    
+                    this.add.text(400, 320, `The word was: ${this.currentWord}`, {
+                        fontSize: '24px',
+                        fill: '#ffffff',
+                        fontFamily: 'Courier New'
+                    }).setOrigin(0.5);
+                    
+                    this.add.text(400, 350, 'Press SPACE to play again', {
+                        fontSize: '20px',
+                        fill: '#ffffff',
+                        fontFamily: 'Courier New'
+                    }).setOrigin(0.5);
+                }
+            }
+
+            restartGame() {
+                if (this.gameState === 'won') {
+                    this.level++;
+                    this.levelText.setText(`Level: ${this.level}`);
+                }
+                
+                this.scene.restart();
+            }
+
+            update() {
+                // Game loop updates
+            }
+        }
+
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            scene: CosmicHangmanScene,
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            backgroundColor: '#0a0a2e'
+        };
+
+        const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>

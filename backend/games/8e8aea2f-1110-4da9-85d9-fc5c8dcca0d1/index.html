@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asteroid Miner Mayhem!</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 1px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        class GameScene extends Phaser.Scene {
+            constructor() {
+                super({ key: 'GameScene' });
+                this.score = 0;
+                this.health = 3;
+                this.inventory = 0;
+                this.maxInventory = 10;
+                this.gameSpeed = 1;
+                this.nextFire = 0;
+            }
+
+            preload() {
+                // Create simple geometric shapes as textures
+                this.add.graphics()
+                    .fillStyle(0x00ff00)
+                    .fillTriangle(0, 0, 10, 20, 20, 0)
+                    .generateTexture('player', 20, 20);
+
+                this.add.graphics()
+                    .fillStyle(0x888888)
+                    .fillCircle(15, 15, 15)
+                    .generateTexture('asteroid-large', 30, 30);
+
+                this.add.graphics()
+                    .fillStyle(0x999999)
+                    .fillCircle(10, 10, 10)
+                    .generateTexture('asteroid-medium', 20, 20);
+
+                this.add.graphics()
+                    .fillStyle(0xaaaaaa)
+                    .fillCircle(7, 7, 7)
+                    .generateTexture('asteroid-small', 14, 14);
+
+                this.add.graphics()
+                    .fillStyle(0xff0000)
+                    .fillTriangle(0, 10, 15, 0, 15, 20)
+                    .generateTexture('pirate', 15, 20);
+
+                this.add.graphics()
+                    .fillStyle(0x00ffff)
+                    .fillRect(0, 0, 8, 2)
+                    .generateTexture('laser', 8, 2);
+
+                this.add.graphics()
+                    .fillStyle(0xffff00)
+                    .fillCircle(3, 3, 3)
+                    .generateTexture('mineral', 6, 6);
+
+                this.add.graphics()
+                    .fillStyle(0xff8800)
+                    .fillRect(0, 0, 4, 8)
+                    .generateTexture('pirate-bullet', 4, 8);
+            }
+
+            create() {
+                // Create starfield background
+                this.stars = this.add.group();
+                for (let i = 0; i < 100; i++) {
+                    const star = this.add.circle(
+                        Phaser.Math.Between(0, 800),
+                        Phaser.Math.Between(0, 600),
+                        1,
+                        0xffffff,
+                        0.5
+                    );
+                    this.stars.add(star);
+                }
+
+                // Create player
+                this.player = this.physics.add.sprite(400, 300, 'player');
+                this.player.setCollideWorldBounds(true);
+                this.player.setDamping(true);
+                this.player.setDrag(0.99);
+                this.player.setMaxVelocity(300);
+
+                // Create groups
+                this.asteroids = this.physics.add.group();
+                this.pirates = this.physics.add.group();
+                this.lasers = this.physics.add.group();
+                this.minerals = this.physics.add.group();
+                this.pirateBullets = this.physics.add.group();
+
+                // Create controls
+                this.cursors = this.input.keyboard.createCursorKeys();
+                this.wasd = this.input.keyboard.addKeys('W,S,A,D,SPACE');
+                this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+
+                // Create UI
+                this.scoreText = this.add.text(16, 16, 'Score: 0', { fontSize: '24px', fill: '#fff' });
+                this.healthText = this.add.text(16, 50, 'Health: ♥♥♥', { fontSize: '20px', fill: '#ff0000' });
+                this.inventoryText = this.add.text(16, 80, 'Cargo: 0/10', { fontSize: '18px', fill: '#ffff00' });
+
+                // Spawn timers
+                this.time.addEvent({
+                    delay: 2000,
+                    callback: this.spawnAsteroid,
+                    callbackScope: this,
+                    loop: true
+                });
+
+                this.time.addEvent({
+                    delay: 5000,
+                    callback: this.spawnPirate,
+                    callbackScope: this,
+                    loop: true
+                });
+
+                // Collisions
+                this.physics.add.overlap(this.player, this.asteroids, this.hitAsteroid, null, this);
+                this.physics.add.overlap(this.player, this.pirates, this.hitPirate, null, this);
+                this.physics.add.overlap(this.player, this.minerals, this.collectMineral, null, this);
+                this.physics.add.overlap(this.player, this.pirateBullets, this.hitByBullet, null, this);
+                this.physics.add.overlap(this.lasers, this.asteroids, this.destroyAsteroid, null, this);
+                this.physics.add.overlap(this.lasers, this.pirates, this.destroyPirate, null, this);
+            }
+
+            update() {
+                // Player movement
+                if (this.cursors.left.isDown || this.wasd.A.isDown) {
+                    this.player.setAngularVelocity(-300);
+                } else if (this.cursors.right.isDown || this.wasd.D.isDown) {
+                    this.player.setAngularVelocity(300);
+                } else {
+                    this.player.setAngularVelocity(0);
+                }
+
+                if (this.cursors.up.isDown || this.wasd.W.isDown) {
+                    const speed = this.inventory >= this.maxInventory ? 100 : 200;
+                    this.physics.velocityFromRotation(this.player.rotation, speed, this.player.body.acceleration);
+                } else {
+                    this.player.setAcceleration(0);
+                }
+
+                // Shooting - continuous fire while holding space
+                if (this.spaceKey.isDown && this.time.now > this.nextFire) {
+                    this.fireLaser();
+                }
+
+                // Move background stars
+                this.stars.children.entries.forEach(star => {
+                    star.y += 1;
+                    if (star.y > 600) {
+                        star.y = 0;
+                        star.x = Phaser.Math.Between(0, 800);
+                    }
+                });
+
+                // Clean up off-screen objects
+                this.cleanupOffScreenObjects();
+
+                // Update pirate AI
+                this.updatePirateAI();
+            }
+
+            spawnAsteroid() {
+                const x = Phaser.Math.Between(-50, 850);
+                const y = -50;
+                const size = Phaser.Math.Between(1, 3);
+                let texture;
+                
+                switch(size) {
+                    case 1: texture = 'asteroid-small'; break;
+                    case 2: texture = 'asteroid-medium'; break;
+                    case 3: texture = 'asteroid-large'; break;
+                }
+
+                const asteroid = this.physics.add.sprite(x, y, texture);
+                asteroid.setVelocity(
+                    Phaser.Math.Between(-50, 50),
+                    Phaser.Math.Between(50, 150)
+                );
+                asteroid.setAngularVelocity(Phaser.Math.Between(-100, 100));
+                asteroid.size = size;
+                this.asteroids.add(asteroid);
+            }
+
+            spawnPirate() {
+                const x = Phaser.Math.Between(0, 800);
+                const y = -50;
+                const pirate = this.physics.add.sprite(x, y, 'pirate');
+                pirate.setVelocity(0, 50);
+                pirate.lastFire = 0;
+                this.pirates.add(pirate);
+            }
+
+            fireLaser() {
+                const laser = this.physics.add.sprite(this.player.x, this.player.y, 'laser');
+                laser.setRotation(this.player.rotation);
+                this.physics.velocityFromRotation(this.player.rotation, 400, laser.body.velocity);
+                this.lasers.add(laser);
+                this.nextFire = this.time.now + 150;
+            }
+
+            updatePirateAI() {
+                this.pirates.children.entries.forEach(pirate => {
+                    if (pirate.active) {
+                        // Simple AI - chase player
+                        const angle = Phaser.Math.Angle.Between(pirate.x, pirate.y, this.player.x, this.player.y);
+                        pirate.setRotation(angle + Math.PI/2);
+                        this.physics.velocityFromRotation(angle, 100, pirate.body.velocity);
+
+                        // Fire at player
+                        if (this.time.now > pirate.lastFire + 2000) {
+                            this.firePirateBullet(pirate);
+                            pirate.lastFire = this.time.now;
+                        }
+                    }
+                });
+            }
+
+            firePirateBullet(pirate) {
+                const bullet = this.physics.add.sprite(pirate.x, pirate.y, 'pirate-bullet');
+                const angle = Phaser.Math.Angle.Between(pirate.x, pirate.y, this.player.x, this.player.y);
+                this.physics.velocityFromRotation(angle, 200, bullet.body.velocity);
+                this.pirateBullets.add(bullet);
+            }
+
+            hitAsteroid(player, asteroid) {
+                this.takeDamage();
+                this.breakAsteroid(asteroid);
+            }
+
+            hitPirate(player, pirate) {
+                this.takeDamage();
+                pirate.destroy();
+            }
+
+            hitByBullet(player, bullet) {
+                this.takeDamage();
+                bullet.destroy();
+            }
+
+            destroyAsteroid(laser, asteroid) {
+                laser.destroy();
+                this.breakAsteroid(asteroid);
+                this.score += asteroid.size * 10;
+                this.updateScore();
+            }
+
+            destroyPirate(laser, pirate) {
+                laser.destroy();
+                pirate.destroy();
+                this.score += 100;
+                this.updateScore();
+                
+                // Drop minerals
+                for (let i = 0; i < 3; i++) {
+                    const mineral = this.physics.add.sprite(
+                        pirate.x + Phaser.Math.Between(-20, 20),
+                        pirate.y + Phaser.Math.Between(-20, 20),
+                        'mineral'
+                    );
+                    mineral.setVelocity(Phaser.Math.Between(-50, 50), Phaser.Math.Between(-50, 50));
+                    this.minerals.add(mineral);
+                }
+            }
+
+            breakAsteroid(asteroid) {
+                const x = asteroid.x;
+                const y = asteroid.y;
+                
+                // Drop minerals
+                for (let i = 0; i < asteroid.size; i++) {
+                    const mineral = this.physics.add.sprite(
+                        x + Phaser.Math.Between(-15, 15),
+                        y + Phaser.Math.Between(-15, 15),
+                        'mineral'
+                    );
+                    mineral.setVelocity(Phaser.Math.Between(-100, 100), Phaser.Math.Between(-100, 100));
+                    this.minerals.add(mineral);
+                }
+
+                // Break into smaller asteroids if large enough
+                if (asteroid.size > 1) {
+                    for (let i = 0; i < 2; i++) {
+                        const newSize = asteroid.size - 1;
+                        let texture;
+                        switch(newSize) {
+                            case 1: texture = 'asteroid-small'; break;
+                            case 2: texture = 'asteroid-medium'; break;
+                        }
+                        
+                        const newAsteroid = this.physics.add.sprite(
+                            x + Phaser.Math.Between(-20, 20),
+                            y + Phaser.Math.Between(-20, 20),
+                            texture
+                        );
+                        newAsteroid.setVelocity(
+                            Phaser.Math.Between(-100, 100),
+                            Phaser.Math.Between(50, 150)
+                        );
+                        newAsteroid.setAngularVelocity(Phaser.Math.Between(-200, 200));
+                        newAsteroid.size = newSize;
+                        this.asteroids.add(newAsteroid);
+                    }
+                }
+
+                asteroid.destroy();
+            }
+
+            collectMineral(player, mineral) {
+                if (this.inventory < this.maxInventory) {
+                    this.inventory++;
+                    this.score += 5;
+                    this.updateScore();
+                    this.updateInventory();
+                }
+                mineral.destroy();
+            }
+
+            takeDamage() {
+                this.health--;
+                this.updateHealth();
+                
+                if (this.health <= 0) {
+                    this.gameOver();
+                }
+            }
+
+            updateScore() {
+                this.scoreText.setText('Score: ' + this.score);
+            }
+
+            updateHealth() {
+                const hearts = '♥'.repeat(this.health);
+                this.healthText.setText('Health: ' + hearts);
+            }
+
+            updateInventory() {
+                this.inventoryText.setText('Cargo: ' + this.inventory + '/' + this.maxInventory);
+            }
+
+            cleanupOffScreenObjects() {
+                [this.asteroids, this.pirates, this.lasers, this.minerals, this.pirateBullets].forEach(group => {
+                    group.children.entries.forEach(obj => {
+                        if (obj.y > 650 || obj.y < -50 || obj.x > 850 || obj.x < -50) {
+                            obj.destroy();
+                        }
+                    });
+                });
+            }
+
+            gameOver() {
+                this.add.rectangle(400, 300, 800, 600, 0x000000, 0.7);
+                this.add.text(400, 250, 'GAME OVER', {
+                    fontSize: '48px',
+                    fill: '#ff0000',
+                    align: 'center'
+                }).setOrigin(0.5);
+                
+                this.add.text(400, 320, 'Final Score: ' + this.score, {
+                    fontSize: '32px',
+                    fill: '#fff',
+                    align: 'center'
+                }).setOrigin(0.5);
+
+                this.add.text(400, 380, 'Press R to Restart', {
+                    fontSize: '24px',
+                    fill: '#fff',
+                    align: 'center'
+                }).setOrigin(0.5);
+
+                this.input.keyboard.on('keydown-R', () => {
+                    this.scene.restart();
+                });
+
+                this.physics.pause();
+            }
+        }
+
+        const config = {
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            backgroundColor: '#000033',
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 },
+                    debug: false
+                }
+            },
+            scene: GameScene
+        };
+
+        const game = new Phaser.Game(config);
+    </script>
+</body>
+</html>
