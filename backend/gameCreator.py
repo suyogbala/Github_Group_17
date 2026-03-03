@@ -1,7 +1,12 @@
 from google import genai
 import json
 from pydantic import BaseModel
-client = genai.Client(api_key="REMOVED_SECRET")
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
 
 class responseBase(BaseModel):
     title: str
@@ -24,7 +29,7 @@ class scene(BaseModel):
 
 
 def create_json(prompt):
-    client = genai.Client(api_key="REMOVED_SECRET")
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY", ""))
     query = f"""You are a game design assistant. The user will give you a short description of a game idea in natural language.
             Your task is to generate a structured JSON object that represents this game concept. Donot add sound assets or music to the game.
             The idea is {prompt}."""

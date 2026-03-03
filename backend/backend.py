@@ -8,13 +8,16 @@ import os
 import uuid
 from datetime import datetime
 import re
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = flask.Flask(__name__)
 CORS(app)
 
-# Initialize API clients - NEVER hardcode API keys!
-GEMINI_API_KEY = "REMOVED_SECRET"
-CLAUDE_API_KEY = "REMOVED_SECRET"
+# Initialize API clients from environment variables
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
 
 if not GEMINI_API_KEY or not CLAUDE_API_KEY:
     raise ValueError("API keys must be set as environment variables")
